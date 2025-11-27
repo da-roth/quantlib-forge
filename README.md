@@ -31,10 +31,7 @@ XAD vs Forge-AAD
 - Bump-reval could be faster — currently using the same kernel that computes AAD
 - AVX vectorization not yet enabled
 
-<details>
-<summary>Full benchmark results</summary>
-
-Raw output: [baseline](docs/benchmarkResults/benchmark-baseline.txt) | [forge](docs/benchmarkResults/benchmark-forge.txt) | [xad](docs/benchmarkResults/benchmark-xad.txt)
+Full benchmark results ([baseline](docs/benchmarkResults/benchmark-baseline.txt) | [forge](docs/benchmarkResults/benchmark-forge.txt) | [xad](docs/benchmarkResults/benchmark-xad.txt)):
 
 ```
 Total Execution Time
@@ -75,8 +72,6 @@ Per-Scenario Timing Breakdown
   3 (100 RF, 3 steps)    1,000      2.88 ms           4.6 ms      0.09 ms  (90×)          0.001 ms       0.05 ms
 ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 ```
-
-</details>
 
 ## Dependencies
 
