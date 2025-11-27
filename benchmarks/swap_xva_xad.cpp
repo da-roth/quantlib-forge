@@ -44,10 +44,6 @@
 // NOTE: This is a standalone executable. Compile against QuantLib built with XAD.
 // =============================================================================
 
-// These headers are from QuantLib-Risks-Cpp test-suite
-#include "toplevelfixture.hpp"
-#include "utilities_xad.hpp"
-
 #include <ql/qldefines.hpp>
 #include <ql/cashflows/couponpricer.hpp>
 #include <ql/cashflows/fixedratecoupon.hpp>

@@ -12,6 +12,7 @@
 ##############################################################################
 
 option(QLFORGE_DISABLE_AAD "Disable using Forge AAD for QuantLib's Real, allowing to run samples with double" OFF)
+option(QLFORGE_BUILD_TEST_SUITE "Build QuantLib-Forge test suite" ON)
 
 # ========== Forge Integration: Use pre-built Forge package ==========
 # Forge is now built and installed separately via forge/tools/packaging
