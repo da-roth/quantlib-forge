@@ -62,6 +62,7 @@ jobs:
             -DQL_EXTERNAL_SUBDIRECTORIES="$(pwd)/../../xad;$(pwd)/../../QuantLib-Risks-Cpp" \
             -DQL_EXTRA_LINK_LIBRARIES=QuantLib-Risks \
             -DQL_NULL_AS_FUNCTIONS=ON \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install \
             ..
 
       - name: Compile
@@ -69,15 +70,10 @@ jobs:
           cd QuantLib/build
           cmake --build .
 
-      - name: Install XAD
-        run: |
-          cd QuantLib/build/xad
-          cmake --install . --prefix ${{ github.workspace }}/install
-
-      - name: Install QuantLib
+      - name: Install
         run: |
           cd QuantLib/build
-          cmake --install . --prefix ${{ github.workspace }}/install
+          cmake --install .
 
       - name: Build XAD Benchmark
         run: |
@@ -86,7 +82,7 @@ jobs:
           cat > CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.15)
           project(SwapXvaXad LANGUAGES CXX)
-          find_package(QuantLib REQUIRED)
+          find_package(QuantLib-Risks REQUIRED)
           add_executable(swap_xva_xad ${BENCHMARK_SOURCE})
           target_link_libraries(swap_xva_xad PRIVATE QuantLib::QuantLib)
           target_include_directories(swap_xva_xad PRIVATE ${QLRISKS_TEST_INCLUDE})
