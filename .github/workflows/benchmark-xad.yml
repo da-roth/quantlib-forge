@@ -69,6 +69,11 @@ jobs:
           cd QuantLib/build
           cmake --build .
 
+      - name: Install XAD
+        run: |
+          cd QuantLib/build/xad
+          cmake --install . --prefix ${{ github.workspace }}/install
+
       - name: Install QuantLib
         run: |
           cd QuantLib/build
