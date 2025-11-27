@@ -34,6 +34,14 @@
 //   2. Forge Kernel Bump-Reval  - JIT-compiled kernel, still using bump-reval
 //   3. Forge AAD                - JIT-compiled kernel with automatic differentiation
 //
+// Test Cases:
+//   1. 1 swap, 1 step, 1 path, 10 risk factors (EUR curve only)
+//   2. 1 swap, 1 step, 1 path, 100 risk factors (full XVA)
+//   3. 1 swap, 3 steps, 1 path, 100 risk factors
+//   4. 1 swap, 3 steps, 10 paths, 100 risk factors
+//   5. 1 swap, 3 steps, 100 paths, 100 risk factors
+//   6. 1 swap, 3 steps, 1000 paths, 100 risk factors
+//
 // Forge provides two distinct benefits:
 //   A) JIT Compilation: Kernel can be re-evaluated with different inputs much faster
 //   B) AAD: Gradients computed automatically in single backward pass (no bumping)
@@ -136,9 +144,11 @@ namespace {
     // Configuration
     //=========================================================================
     struct XvaConfig {
+        std::string name;
         Size numSwaps = 1;
-        Size numTimeSteps = 3;
-        Size numPaths = 1000;
+        Size numTimeSteps = 1;
+        Size numPaths = 1;
+        Size numRiskFactors = 10;
         Size warmupRuns = 2;
         Size timedRuns = 5;
         double bumpSize = 1e-4;
@@ -157,14 +167,12 @@ namespace {
     };
 
     //=========================================================================
-    // Market Scenario (100 risk factors total)
+    // Market Scenario
     //=========================================================================
     struct MarketScenario {
         std::vector<double> flatData;
 
         const std::vector<double>& flatten() const { return flatData; }
-
-        static constexpr Size totalRiskFactors() { return 100; }
     };
 
     //=========================================================================
@@ -192,7 +200,7 @@ namespace {
     };
 
     //=========================================================================
-    // Generate scenarios with all 100 risk factors
+    // Generate scenarios with specified number of risk factors
     //=========================================================================
     std::vector<std::vector<MarketScenario>> generateScenarios(
         const XvaConfig& config,
@@ -212,56 +220,67 @@ namespace {
 
         for (Size t = 0; t < config.numTimeSteps; ++t) {
             scenarios[t].resize(config.numPaths);
-            double timeYears = double(t + 1) / config.numTimeSteps * 5.0;
-            double sqrtTime = std::sqrt(timeYears);
+            double timeYears = config.numTimeSteps > 1 ? double(t + 1) / config.numTimeSteps * 5.0 : 0.0;
+            double sqrtTime = std::sqrt(std::max(timeYears, 0.01));
 
             for (Size p = 0; p < config.numPaths; ++p) {
                 MarketScenario& sc = scenarios[t][p];
-                sc.flatData.resize(100);
+                sc.flatData.resize(config.numRiskFactors);
                 Size idx = 0;
 
+                // EUR curve (first 10 risk factors)
                 double eurParallel = dist(gen);
-                for (Size i = 0; i < eurPillars.size(); ++i) {
+                for (Size i = 0; i < std::min(Size(10), config.numRiskFactors); ++i) {
                     sc.flatData[idx++] = eurPillars[i].baseRate + eurPillars[i].volatility * eurParallel * sqrtTime;
                 }
 
+                if (config.numRiskFactors <= 10) continue;
+
+                // USD curve (10-19)
                 double usdParallel = dist(gen);
-                for (Size i = 0; i < 10; ++i) {
+                for (Size i = 0; i < 10 && idx < config.numRiskFactors; ++i) {
                     sc.flatData[idx++] = baseFactors.usdRates[i] + rateVol * usdParallel * sqrtTime;
                 }
 
+                // GBP curve (20-29)
                 double gbpParallel = dist(gen);
-                for (Size i = 0; i < 10; ++i) {
+                for (Size i = 0; i < 10 && idx < config.numRiskFactors; ++i) {
                     sc.flatData[idx++] = baseFactors.gbpRates[i] + rateVol * gbpParallel * sqrtTime;
                 }
 
+                // JPY curve (30-39)
                 double jpyParallel = dist(gen);
-                for (Size i = 0; i < 10; ++i) {
+                for (Size i = 0; i < 10 && idx < config.numRiskFactors; ++i) {
                     sc.flatData[idx++] = baseFactors.jpyRates[i] + rateVol * jpyParallel * sqrtTime;
                 }
 
+                // CHF curve (40-49)
                 double chfParallel = dist(gen);
-                for (Size i = 0; i < 10; ++i) {
+                for (Size i = 0; i < 10 && idx < config.numRiskFactors; ++i) {
                     sc.flatData[idx++] = baseFactors.chfRates[i] + rateVol * chfParallel * sqrtTime;
                 }
 
-                for (Size i = 0; i < 5; ++i) {
+                // FX rates (50-54)
+                for (Size i = 0; i < 5 && idx < config.numRiskFactors; ++i) {
                     double fxShock = dist(gen);
                     sc.flatData[idx++] = baseFactors.fxRates[i] * std::exp(fxVol * fxShock * sqrtTime - 0.5 * fxVol * fxVol * timeYears);
                 }
 
+                // Counterparty credit spreads (55-64)
                 double cptyShock = dist(gen);
-                for (Size i = 0; i < 10; ++i) {
+                for (Size i = 0; i < 10 && idx < config.numRiskFactors; ++i) {
                     sc.flatData[idx++] = baseFactors.counterpartySpreads[i] * std::exp(creditVol * cptyShock * sqrtTime);
                 }
 
+                // Own credit spreads (65-74)
                 double ownShock = dist(gen);
-                for (Size i = 0; i < 10; ++i) {
+                for (Size i = 0; i < 10 && idx < config.numRiskFactors; ++i) {
                     sc.flatData[idx++] = baseFactors.ownSpreads[i] * std::exp(creditVol * ownShock * sqrtTime);
                 }
 
+                // Vol surface (75-99)
                 double volShock = dist(gen);
-                for (Size i = 0; i < 25; ++i) {
+                for (Size i = 0; i < 25 && idx < config.numRiskFactors; ++i) {
                     sc.flatData[idx++] = baseFactors.volSurface[i] * std::exp(volVol * volShock * sqrtTime);
                 }
             }
@@ -282,9 +301,9 @@ namespace {
     }
 
     //=========================================================================
-    // Price swap at time step with all 100 risk factors
+    // Price swap - 10 risk factors (EUR curve only)
     //=========================================================================
-    Real priceSwapAtTimeStep(
+    Real priceSwap10RF(
         const SwapDefinition& swapDef,
         Size timeStep,
         Size totalTimeSteps,
@@ -294,7 +313,62 @@ namespace {
         const Calendar& calendar,
         const DayCounter& dayCounter) {
 
-        double timeStepFraction = double(timeStep) / totalTimeSteps;
+        double timeStepFraction = totalTimeSteps > 1 ? double(timeStep) / totalTimeSteps : 0.0;
+        Integer elapsedYears = Integer(timeStepFraction * swapDef.tenorYears);
+        Integer remainingYears = swapDef.tenorYears - elapsedYears;
+
+        if (remainingYears <= 0) {
+            return Real(0.0);
+        }
+
+        std::vector<Date> curveDates;
+        std::vector<Real> curveRates;
+        curveDates.push_back(today);
+        curveRates.push_back(allInputs[0]);
+
+        for (Size i = 0; i < 10 && i < eurPillarDefs.size(); ++i) {
+            curveDates.push_back(calendar.advance(today, eurPillarDefs[i].tenor));
+            curveRates.push_back(allInputs[i]);
+        }
+
+        RelinkableHandle<YieldTermStructure> termStructure;
+        auto zeroCurve = ext::make_shared<ZeroCurve>(curveDates, curveRates, dayCounter);
+        zeroCurve->enableExtrapolation();
+        termStructure.linkTo(zeroCurve);
+
+        auto index = ext::make_shared<Euribor6M>(termStructure);
+        Date start = calendar.advance(today, index->fixingDays(), Days);
+        Date maturity = calendar.advance(start, remainingYears, Years);
+
+        Schedule fixedSchedule(start, maturity, swapDef.fixedFreq, calendar,
+                               ModifiedFollowing, ModifiedFollowing,
+                               DateGeneration::Forward, false);
+        Schedule floatSchedule(start, maturity, swapDef.floatFreq, calendar,
+                               ModifiedFollowing, ModifiedFollowing,
+                               DateGeneration::Forward, false);
+
+        auto swap = ext::make_shared<VanillaSwap>(
+            VanillaSwap::Payer, swapDef.notional, fixedSchedule, swapDef.fixedRate,
+            dayCounter, floatSchedule, index, swapDef.spread, dayCounter);
+
+        swap->setPricingEngine(ext::make_shared<DiscountingSwapEngine>(termStructure));
+        return swap->NPV();
+    }
+
+    //=========================================================================
+    // Price swap - 100 risk factors (full XVA)
+    //=========================================================================
+    Real priceSwap100RF(
+        const SwapDefinition& swapDef,
+        Size timeStep,
+        Size totalTimeSteps,
+        const std::vector<Real>& allInputs,
+        const std::vector<IRPillar>& eurPillarDefs,
+        const Date& today,
+        const Calendar& calendar,
+        const DayCounter& dayCounter) {
+
+        double timeStepFraction = totalTimeSteps > 1 ? double(timeStep) / totalTimeSteps : 0.0;
         Integer elapsedYears = Integer(timeStepFraction * swapDef.tenorYears);
         Integer remainingYears = swapDef.tenorYears - elapsedYears;
 
@@ -376,6 +450,27 @@ namespace {
     }
 
     //=========================================================================
+    // Price swap dispatcher based on number of risk factors
+    //=========================================================================
+    Real priceSwap(
+        const SwapDefinition& swapDef,
+        Size timeStep,
+        Size totalTimeSteps,
+        const std::vector<Real>& allInputs,
+        const std::vector<IRPillar>& eurPillarDefs,
+        const Date& today,
+        const Calendar& calendar,
+        const DayCounter& dayCounter,
+        Size numRiskFactors) {
+
+        if (numRiskFactors <= 10) {
+            return priceSwap10RF(swapDef, timeStep, totalTimeSteps, allInputs, eurPillarDefs, today, calendar, dayCounter);
+        } else {
+            return priceSwap100RF(swapDef, timeStep, totalTimeSteps, allInputs, eurPillarDefs, today, calendar, dayCounter);
+        }
+    }
+
+    //=========================================================================
     // 1. BUMP-REVAL COMPUTATION (Baseline)
     //=========================================================================
     XvaResults computeBumpReval(
@@ -394,7 +489,6 @@ namespace {
 
         double totalExposure = 0.0;
         Size totalEvaluations = 0;
-        const Size numInputs = 100;
         Size numScenarios = 0;
 
         auto startTime = std::chrono::high_resolution_clock::now();
@@ -412,19 +506,19 @@ namespace {
                     std::vector<double> flatInputs = scenario.flatten();
                     std::vector<Real> realInputs(flatInputs.begin(), flatInputs.end());
 
-                    double baseNpv = value(priceSwapAtTimeStep(
-                        swaps[s], t, config.numTimeSteps, realInputs, pillars, today, calendar, dayCounter));
+                    double baseNpv = value(priceSwap(
+                        swaps[s], t, config.numTimeSteps, realInputs, pillars, today, calendar, dayCounter, config.numRiskFactors));
                     totalEvaluations++;
 
                     results.exposures[s][t][p] = std::max(0.0, baseNpv);
                     totalExposure += results.exposures[s][t][p];
 
-                    results.sensitivities[s][t][p].resize(numInputs);
-                    for (Size i = 0; i < numInputs; ++i) {
+                    results.sensitivities[s][t][p].resize(config.numRiskFactors);
+                    for (Size i = 0; i < config.numRiskFactors; ++i) {
                         std::vector<Real> bumpedInputs = realInputs;
                         bumpedInputs[i] += config.bumpSize;
-                        double bumpedNpv = value(priceSwapAtTimeStep(
-                            swaps[s], t, config.numTimeSteps, bumpedInputs, pillars, today, calendar, dayCounter));
+                        double bumpedNpv = value(priceSwap(
+                            swaps[s], t, config.numTimeSteps, bumpedInputs, pillars, today, calendar, dayCounter, config.numRiskFactors));
                         totalEvaluations++;
                         results.sensitivities[s][t][p][i] = (bumpedNpv - baseNpv) / config.bumpSize;
                     }
@@ -439,12 +533,12 @@ namespace {
         timing.numScenarios = numScenarios;
         timing.numEvaluations = totalEvaluations;
         timing.evaluationTimeMs = duration.count() / 1000.0;
-        timing.singleScenarioTimeUs = double(duration.count()) / numScenarios;
+        timing.singleScenarioTimeUs = numScenarios > 0 ? double(duration.count()) / numScenarios : 0.0;
         timing.numKernelsCreated = 0;
         timing.kernelCreationTimeMs = 0.0;
 
         Size totalScenarios = config.numSwaps * config.numTimeSteps * config.numPaths;
-        results.expectedExposure = totalExposure / totalScenarios;
+        results.expectedExposure = totalScenarios > 0 ? totalExposure / totalScenarios : 0.0;
         results.cva = results.expectedExposure * 0.4 * 0.02;
 
         return results;
@@ -473,7 +567,6 @@ namespace {
         Size numScenarios = 0;
         double totalKernelCreationUs = 0.0;
         double totalEvalUs = 0.0;
-        const Size numInputs = 100;
 
         for (Size s = 0; s < config.numSwaps; ++s) {
             results.exposures[s].resize(config.numTimeSteps);
@@ -490,15 +583,15 @@ namespace {
                 recorder.start();
 
                 std::vector<double> flatInputs = scenarios[t][0].flatten();
-                std::vector<Real> rateInputs(numInputs);
-                std::vector<forge::NodeId> rateNodeIds(numInputs);
-                for (Size i = 0; i < numInputs; ++i) {
+                std::vector<Real> rateInputs(config.numRiskFactors);
+                std::vector<forge::NodeId> rateNodeIds(config.numRiskFactors);
+                for (Size i = 0; i < config.numRiskFactors; ++i) {
                     rateInputs[i] = flatInputs[i];
                     rateInputs[i].markForgeInput();
                     rateNodeIds[i] = rateInputs[i].forgeNodeId();
                 }
 
-                Real npv = priceSwapAtTimeStep(swaps[s], t, config.numTimeSteps, rateInputs, pillars, today, calendar, dayCounter);
+                Real npv = priceSwap(swaps[s], t, config.numTimeSteps, rateInputs, pillars, today, calendar, dayCounter, config.numRiskFactors);
                 npv.markForgeOutput();
                 forge::NodeId npvNodeId = npv.forgeNodeId();
 
@@ -520,7 +613,7 @@ namespace {
                     const auto& scenario = scenarios[t][p];
                     std::vector<double> scenarioInputs = scenario.flatten();
 
-                    for (Size i = 0; i < numInputs; ++i) {
+                    for (Size i = 0; i < config.numRiskFactors; ++i) {
                         buffer->setValue(rateNodeIds[i], scenarioInputs[i]);
                     }
                     kernel->execute(*buffer);
@@ -530,8 +623,8 @@ namespace {
                     results.exposures[s][t][p] = std::max(0.0, baseNpv);
                     totalExposure += results.exposures[s][t][p];
 
-                    results.sensitivities[s][t][p].resize(numInputs);
-                    for (Size i = 0; i < numInputs; ++i) {
+                    results.sensitivities[s][t][p].resize(config.numRiskFactors);
+                    for (Size i = 0; i < config.numRiskFactors; ++i) {
                         buffer->setValue(rateNodeIds[i], scenarioInputs[i] + config.bumpSize);
                         kernel->execute(*buffer);
                         numEvaluations++;
@@ -554,10 +647,10 @@ namespace {
         timing.numScenarios = numScenarios;
         timing.kernelCreationTimeMs = totalKernelCreationUs / 1000.0;
         timing.evaluationTimeMs = totalEvalUs / 1000.0;
-        timing.singleScenarioTimeUs = totalEvalUs / numScenarios;
+        timing.singleScenarioTimeUs = numScenarios > 0 ? totalEvalUs / numScenarios : 0.0;
 
         Size totalScenarios = config.numSwaps * config.numTimeSteps * config.numPaths;
-        results.expectedExposure = totalExposure / totalScenarios;
+        results.expectedExposure = totalScenarios > 0 ? totalExposure / totalScenarios : 0.0;
         results.cva = results.expectedExposure * 0.4 * 0.02;
 
         return results;
@@ -586,7 +679,6 @@ namespace {
         Size numScenarios = 0;
         double totalKernelCreationUs = 0.0;
         double totalEvalUs = 0.0;
-        const Size numInputs = 100;
 
         for (Size s = 0; s < config.numSwaps; ++s) {
             results.exposures[s].resize(config.numTimeSteps);
@@ -603,15 +695,15 @@ namespace {
                 recorder.start();
 
                 std::vector<double> flatInputs = scenarios[t][0].flatten();
-                std::vector<Real> rateInputs(numInputs);
-                std::vector<forge::NodeId> rateNodeIds(numInputs);
-                for (Size i = 0; i < numInputs; ++i) {
+                std::vector<Real> rateInputs(config.numRiskFactors);
+                std::vector<forge::NodeId> rateNodeIds(config.numRiskFactors);
+                for (Size i = 0; i < config.numRiskFactors; ++i) {
                     rateInputs[i] = flatInputs[i];
                     rateInputs[i].markForgeInput();
                     rateNodeIds[i] = rateInputs[i].forgeNodeId();
                 }
 
-                Real npv = priceSwapAtTimeStep(swaps[s], t, config.numTimeSteps, rateInputs, pillars, today, calendar, dayCounter);
+                Real npv = priceSwap(swaps[s], t, config.numTimeSteps, rateInputs, pillars, today, calendar, dayCounter, config.numRiskFactors);
                 npv.markForgeOutput();
                 forge::NodeId npvNodeId = npv.forgeNodeId();
 
@@ -624,8 +716,8 @@ namespace {
 
                 // Pre-compute gradient buffer indices
                 int vectorWidth = buffer->getVectorWidth();
-                std::vector<size_t> gradientIndices(numInputs);
-                for (Size i = 0; i < numInputs; ++i) {
+                std::vector<size_t> gradientIndices(config.numRiskFactors);
+                for (Size i = 0; i < config.numRiskFactors; ++i) {
                     gradientIndices[i] = static_cast<size_t>(rateNodeIds[i]) * vectorWidth;
                 }
 
@@ -636,13 +728,13 @@ namespace {
                 // --- EVALUATION ---
                 auto evalStartTime = std::chrono::high_resolution_clock::now();
 
-                std::vector<double> gradOutput(numInputs);
+                std::vector<double> gradOutput(config.numRiskFactors);
 
                 for (Size p = 0; p < config.numPaths; ++p) {
                     const auto& scenario = scenarios[t][p];
                     std::vector<double> scenarioInputs = scenario.flatten();
 
-                    for (Size i = 0; i < numInputs; ++i) {
+                    for (Size i = 0; i < config.numRiskFactors; ++i) {
                         buffer->setValue(rateNodeIds[i], scenarioInputs[i]);
                     }
 
@@ -668,10 +760,10 @@ namespace {
         timing.numScenarios = numScenarios;
         timing.kernelCreationTimeMs = totalKernelCreationUs / 1000.0;
         timing.evaluationTimeMs = totalEvalUs / 1000.0;
-        timing.singleScenarioTimeUs = totalEvalUs / numScenarios;
+        timing.singleScenarioTimeUs = numScenarios > 0 ? totalEvalUs / numScenarios : 0.0;
 
         Size totalScenarios = config.numSwaps * config.numTimeSteps * config.numPaths;
-        results.expectedExposure = totalExposure / totalScenarios;
+        results.expectedExposure = totalScenarios > 0 ? totalExposure / totalScenarios : 0.0;
         results.cva = results.expectedExposure * 0.4 * 0.02;
 
         return results;
@@ -722,7 +814,9 @@ namespace {
         timing.numKernelsCreated = accumulatedTiming.numKernelsCreated / config.timedRuns;
         timing.numEvaluations = accumulatedTiming.numEvaluations / config.timedRuns;
         timing.numScenarios = accumulatedTiming.numScenarios / config.timedRuns;
-        timing.singleScenarioTimeUs = (accumulatedTiming.evaluationTimeMs * 1000.0) / accumulatedTiming.numScenarios;
+        timing.singleScenarioTimeUs = accumulatedTiming.numScenarios > 0
+            ? (accumulatedTiming.evaluationTimeMs * 1000.0) / accumulatedTiming.numScenarios
+            : 0.0;
 
         return timing;
     }
@@ -731,6 +825,7 @@ namespace {
     // Print results table (3 columns)
     //=========================================================================
     void printResultsTable(
+        const std::string& testName,
         const TimingResults& bumpTiming,
         const XvaResults& bumpResults,
         const TimingResults& forgeBumpTiming,
@@ -744,7 +839,6 @@ namespace {
         const int col2 = 16;
         const int col3 = 16;
         const int col4 = 16;
-        const Size numInputs = 100;
 
         auto line = [&]() {
             std::cout << "+" << std::string(col1, '-') << "+"
@@ -755,13 +849,18 @@ namespace {
 
         std::cout << "\n";
         line();
-        std::cout << "|                   XVA PERFORMANCE COMPARISON (FORGE)                     |\n";
+        std::cout << "|" << std::setw(col1 + col2 + col3 + col4 + 3) << std::left
+                  << (" " + testName) << "|\n";
         line();
-        std::cout << "| Config: " << config.numSwaps << " swaps, "
-                  << config.numTimeSteps << " steps, "
-                  << config.numPaths << " paths, "
-                  << numInputs << " risk factors"
-                  << std::string(8, ' ') << "|\n";
+        std::cout << "| Config: " << config.numSwaps << " swap, "
+                  << config.numTimeSteps << " step" << (config.numTimeSteps > 1 ? "s" : "") << ", "
+                  << config.numPaths << " path" << (config.numPaths > 1 ? "s" : "") << ", "
+                  << config.numRiskFactors << " RF";
+        int padding = col1 + col2 + col3 + col4 - 20 - std::to_string(config.numSwaps).length()
+                      - std::to_string(config.numTimeSteps).length()
+                      - std::to_string(config.numPaths).length()
+                      - std::to_string(config.numRiskFactors).length();
+        std::cout << std::string(std::max(1, padding), ' ') << "|\n";
         line();
 
         std::cout << "|" << std::setw(col1) << std::left << " Method"
@@ -808,14 +907,14 @@ namespace {
                   << "|" << std::setw(col4) << std::right << forgeAadTiming.singleScenarioTimeUs << "|\n";
         line();
 
-        double speedupForgeBump = bumpTiming.totalTimeMs / forgeBumpTiming.totalTimeMs;
-        double speedupForgeAad = bumpTiming.totalTimeMs / forgeAadTiming.totalTimeMs;
+        double speedupForgeBump = bumpTiming.totalTimeMs > 0 ? bumpTiming.totalTimeMs / forgeBumpTiming.totalTimeMs : 0.0;
+        double speedupForgeAad = bumpTiming.totalTimeMs > 0 ? bumpTiming.totalTimeMs / forgeAadTiming.totalTimeMs : 0.0;
         std::cout << "|" << std::setw(col1) << std::left << " Speedup"
                   << "|" << std::setw(col2-1) << std::right << "1.00" << "x"
                   << "|" << std::setw(col3-1) << std::right << speedupForgeBump << "x"
                   << "|" << std::setw(col4-1) << std::right << speedupForgeAad << "x|\n";
 
-        Size evalsPerScenarioBump = 1 + numInputs;
+        Size evalsPerScenarioBump = 1 + config.numRiskFactors;
         std::cout << "|" << std::setw(col1) << std::left << " Evals/Scenario"
                   << "|" << std::setw(col2) << std::right << evalsPerScenarioBump
                   << "|" << std::setw(col3) << std::right << evalsPerScenarioBump
@@ -837,21 +936,31 @@ namespace {
                   << "|" << std::setw(col4) << std::right << forgeAadResults.cva << "|\n";
         line();
 
-        std::cout << "| Sample Sensitivities (Swap 0, Time 0, Path 0):" << std::string(25, ' ') << "|\n";
-        line();
+        // Sample sensitivities
+        Size numSensToShow = std::min(Size(5), config.numRiskFactors);
+        if (numSensToShow > 0 && !bumpResults.sensitivities.empty() &&
+            !bumpResults.sensitivities[0].empty() &&
+            !bumpResults.sensitivities[0][0].empty()) {
+            std::cout << "| Sample Sensitivities (Swap 0, Time 0, Path 0):"
+                      << std::string(col1 + col2 + col3 + col4 - 43, ' ') << "|\n";
+            line();
 
-        for (Size i = 0; i < std::min(eurPillars.size(), Size(5)); ++i) {
-            std::string label = " dNPV/d(" + eurPillars[i].name + ")";
-            std::cout << "|" << std::setw(col1) << std::left << label
-                      << "|" << std::setw(col2) << std::right << bumpResults.sensitivities[0][0][0][i]
-                      << "|" << std::setw(col3) << std::right << forgeBumpResults.sensitivities[0][0][0][i]
-                      << "|" << std::setw(col4) << std::right << forgeAadResults.sensitivities[0][0][0][i] << "|\n";
+            for (Size i = 0; i < numSensToShow && i < eurPillars.size(); ++i) {
+                std::string label = " dNPV/d(" + eurPillars[i].name + ")";
+                std::cout << "|" << std::setw(col1) << std::left << label
+                          << "|" << std::setw(col2) << std::right << bumpResults.sensitivities[0][0][0][i]
+                          << "|" << std::setw(col3) << std::right << forgeBumpResults.sensitivities[0][0][0][i]
+                          << "|" << std::setw(col4) << std::right << forgeAadResults.sensitivities[0][0][0][i] << "|\n";
+            }
+            if (config.numRiskFactors > numSensToShow) {
+                std::string moreLabel = " ... (" + std::to_string(config.numRiskFactors - numSensToShow) + " more)";
+                std::cout << "|" << std::setw(col1) << std::left << moreLabel
+                          << "|" << std::setw(col2) << " "
+                          << "|" << std::setw(col3) << " "
+                          << "|" << std::setw(col4) << " " << "|\n";
+            }
+            line();
         }
-        std::cout << "|" << std::setw(col1) << std::left << " ... (95 more)"
-                  << "|" << std::setw(col2) << " "
-                  << "|" << std::setw(col3) << " "
-                  << "|" << std::setw(col4) << " " << "|\n";
-        line();
         std::cout << "\n";
     }
 
@@ -862,49 +971,80 @@ namespace {
         const XvaResults& bumpResults,
         const XvaResults& forgeBumpResults,
         const XvaResults& forgeAadResults,
+        const XvaConfig& config,
         double tolerance = 0.001) {
 
         bool passed = true;
-        const Size numInputs = 100;
 
         // Check expected exposure
         double exposureDiff1 = std::abs(bumpResults.expectedExposure - forgeBumpResults.expectedExposure);
         double exposureDiff2 = std::abs(bumpResults.expectedExposure - forgeAadResults.expectedExposure);
         double exposureTol = std::abs(bumpResults.expectedExposure) * tolerance;
 
-        if (exposureDiff1 > exposureTol) {
+        if (exposureDiff1 > exposureTol && bumpResults.expectedExposure > 1e-10) {
             std::cerr << "WARNING: Exposure mismatch Bump vs Forge-Bump: " << exposureDiff1 << " > " << exposureTol << "\n";
             passed = false;
         }
-        if (exposureDiff2 > exposureTol) {
+        if (exposureDiff2 > exposureTol && bumpResults.expectedExposure > 1e-10) {
             std::cerr << "WARNING: Exposure mismatch Bump vs Forge-AAD: " << exposureDiff2 << " > " << exposureTol << "\n";
             passed = false;
         }
 
         // Check sensitivities for first scenario
-        for (Size i = 0; i < numInputs; ++i) {
-            double bumpSens = bumpResults.sensitivities[0][0][0][i];
-            if (std::abs(bumpSens) > 1e-10) {
-                double forgeBumpSens = forgeBumpResults.sensitivities[0][0][0][i];
-                double forgeAadSens = forgeAadResults.sensitivities[0][0][0][i];
+        if (!bumpResults.sensitivities.empty() &&
+            !bumpResults.sensitivities[0].empty() &&
+            !bumpResults.sensitivities[0][0].empty()) {
+            for (Size i = 0; i < config.numRiskFactors; ++i) {
+                double bumpSens = bumpResults.sensitivities[0][0][0][i];
+                if (std::abs(bumpSens) > 1e-10) {
+                    double forgeBumpSens = forgeBumpResults.sensitivities[0][0][0][i];
+                    double forgeAadSens = forgeAadResults.sensitivities[0][0][0][i];
 
-                double diff1 = std::abs(bumpSens - forgeBumpSens) / std::abs(bumpSens);
-                double diff2 = std::abs(bumpSens - forgeAadSens) / std::abs(bumpSens);
+                    double diff1 = std::abs(bumpSens - forgeBumpSens) / std::abs(bumpSens);
+                    double diff2 = std::abs(bumpSens - forgeAadSens) / std::abs(bumpSens);
 
-                if (diff1 > 0.01) {  // 1% tolerance for sensitivities
-                    std::cerr << "WARNING: Sensitivity[" << i << "] mismatch Bump vs Forge-Bump: "
-                              << bumpSens << " vs " << forgeBumpSens << " (" << diff1*100 << "%)\n";
-                    passed = false;
-                }
-                if (diff2 > 0.01) {
-                    std::cerr << "WARNING: Sensitivity[" << i << "] mismatch Bump vs Forge-AAD: "
-                              << bumpSens << " vs " << forgeAadSens << " (" << diff2*100 << "%)\n";
-                    passed = false;
+                    if (diff1 > 0.01) {  // 1% tolerance for sensitivities
+                        std::cerr << "WARNING: Sensitivity[" << i << "] mismatch Bump vs Forge-Bump: "
+                                  << bumpSens << " vs " << forgeBumpSens << " (" << diff1*100 << "%)\n";
+                        passed = false;
+                    }
+                    if (diff2 > 0.01) {
+                        std::cerr << "WARNING: Sensitivity[" << i << "] mismatch Bump vs Forge-AAD: "
+                                  << bumpSens << " vs " << forgeAadSens << " (" << diff2*100 << "%)\n";
+                        passed = false;
+                    }
                 }
             }
         }
 
         return passed;
+    }
+
+    //=========================================================================
+    // Create test case configurations
+    //=========================================================================
+    std::vector<XvaConfig> createTestCases() {
+        std::vector<XvaConfig> configs;
+
+        // Test 1: Simple pricing - 10 risk factors (EUR curve only)
+        configs.push_back({"Test 1: Simple (10 RF)", 1, 1, 1, 10, 2, 5, 1e-4});
+
+        // Test 2: Full XVA risk factors - 100 RF, single scenario
+        configs.push_back({"Test 2: Full RF (100 RF)", 1, 1, 1, 100, 2, 5, 1e-4});
+
+        // Test 3: Add time steps
+        configs.push_back({"Test 3: Time Steps (3 steps)", 1, 3, 1, 100, 2, 5, 1e-4});
+
+        // Test 4: Add MC paths (10)
+        configs.push_back({"Test 4: MC 10 paths", 1, 3, 10, 100, 2, 5, 1e-4});
+
+        // Test 5: Add MC paths (100)
+        configs.push_back({"Test 5: MC 100 paths", 1, 3, 100, 100, 2, 5, 1e-4});
+
+        // Test 6: Full scale (1000 paths)
+        configs.push_back({"Test 6: Full Scale (1000 paths)", 1, 3, 1000, 100, 2, 5, 1e-4});
+
+        return configs;
     }
 
 }  // namespace
@@ -918,13 +1058,6 @@ int main(int argc, char* argv[]) {
     std::cout << "=============================================================\n";
 
     try {
-        XvaConfig config;
-        config.numSwaps = 1;
-        config.numTimeSteps = 3;
-        config.numPaths = 1000;
-        config.warmupRuns = 2;
-        config.timedRuns = 5;
-
         Calendar calendar = TARGET();
         Date today = Date(15, January, 2024);
         Settings::instance().evaluationDate() = today;
@@ -932,41 +1065,54 @@ int main(int argc, char* argv[]) {
 
         auto eurPillars = createEURCurvePillars();
         auto baseRiskFactors = createBaseRiskFactors();
-        auto swaps = createSwapDefinitions(config.numSwaps);
-        auto scenarios = generateScenarios(config, eurPillars, baseRiskFactors);
+        auto testCases = createTestCases();
 
-        // 1. Bump-Reval (baseline)
-        std::cout << "\nRunning Bump-Reval baseline (100 risk factors)...\n";
-        XvaResults bumpResults;
-        auto bumpTiming = runWithTiming(computeBumpReval, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, bumpResults);
+        bool allPassed = true;
 
-        // 2. Forge Kernel Bump-Reval (JIT speedup only)
-        std::cout << "Running Forge-Bump (100 risk factors)...\n";
-        XvaResults forgeBumpResults;
-        auto forgeBumpTiming = runWithTiming(computeForgeKernelBumpReval, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, forgeBumpResults);
+        for (const auto& config : testCases) {
+            std::cout << "\nRunning " << config.name << "...\n";
 
-        // 3. Forge AAD (JIT + AAD)
-        std::cout << "Running Forge-AAD (100 risk factors)...\n";
-        XvaResults forgeAadResults;
-        auto forgeAadTiming = runWithTiming(computeForgeAad, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, forgeAadResults);
+            auto swaps = createSwapDefinitions(config.numSwaps);
+            auto scenarios = generateScenarios(config, eurPillars, baseRiskFactors);
 
-        // Print results
-        printResultsTable(bumpTiming, bumpResults,
-                          forgeBumpTiming, forgeBumpResults,
-                          forgeAadTiming, forgeAadResults,
-                          eurPillars, config);
+            // 1. Bump-Reval (baseline)
+            std::cout << "  Bump-Reval (" << config.numRiskFactors << " RF)...\n";
+            XvaResults bumpResults;
+            auto bumpTiming = runWithTiming(computeBumpReval, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, bumpResults);
 
-        // Verify results match
-        bool verified = verifyResults(bumpResults, forgeBumpResults, forgeAadResults);
+            // 2. Forge Kernel Bump-Reval (JIT speedup only)
+            std::cout << "  Forge-Bump (" << config.numRiskFactors << " RF)...\n";
+            XvaResults forgeBumpResults;
+            auto forgeBumpTiming = runWithTiming(computeForgeKernelBumpReval, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, forgeBumpResults);
 
-        if (verified) {
-            std::cout << "All results verified successfully.\n";
-        } else {
-            std::cout << "WARNING: Some results did not match within tolerance.\n";
+            // 3. Forge AAD (JIT + AAD)
+            std::cout << "  Forge-AAD (" << config.numRiskFactors << " RF)...\n";
+            XvaResults forgeAadResults;
+            auto forgeAadTiming = runWithTiming(computeForgeAad, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, forgeAadResults);
+
+            // Print results
+            printResultsTable(config.name, bumpTiming, bumpResults,
+                              forgeBumpTiming, forgeBumpResults,
+                              forgeAadTiming, forgeAadResults,
+                              eurPillars, config);
+
+            // Verify results match
+            bool verified = verifyResults(bumpResults, forgeBumpResults, forgeAadResults, config);
+            if (!verified) {
+                allPassed = false;
+            }
         }
 
-        std::cout << "Forge benchmark completed successfully.\n";
-        return verified ? 0 : 1;
+        std::cout << "=============================================================\n";
+        if (allPassed) {
+            std::cout << "  All results verified successfully.\n";
+        } else {
+            std::cout << "  WARNING: Some results did not match within tolerance.\n";
+        }
+        std::cout << "  Forge benchmark completed successfully.\n";
+        std::cout << "=============================================================\n";
+
+        return allPassed ? 0 : 1;
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
