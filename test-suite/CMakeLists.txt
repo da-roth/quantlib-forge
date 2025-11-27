@@ -12,8 +12,6 @@
 ##############################################################################
 
 set(QLFORGE_TEST_SOURCES
-    swap_xva.cpp
-
     utilities_forge.cpp
     quantlibtestsuite_forge.cpp
 )
@@ -23,7 +21,7 @@ set(QLFORGE_TEST_HEADERS
     toplevelfixture.hpp
 )
 
-if(QL_BUILD_TEST_SUITE)
+if(QLFORGE_BUILD_TEST_SUITE)
     add_executable(QuantLib-Forge_test_suite ${QLFORGE_TEST_SOURCES} ${QLFORGE_TEST_HEADERS})
     set_target_properties(QuantLib-Forge_test_suite PROPERTIES OUTPUT_NAME "quantlib-forge-test-suite")
     if (NOT Boost_USE_STATIC_LIBS)
