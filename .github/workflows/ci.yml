@@ -1,0 +1,199 @@
+##############################################################################
+#
+#  QuantLib-Forge CI Workflow
+#
+#  This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
+#
+#  Copyright (C) 2025 The QuantLib-Forge Authors
+#
+#  SPDX-License-Identifier: AGPL-3.0-or-later
+#
+##############################################################################
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  BOOST_VERSION: 1_84_0
+  BOOST_VERSION_DOT: 1.84.0
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout quantlib-forge
+        uses: actions/checkout@v4
+        with:
+          path: quantlib-forge
+
+      - name: Checkout Forge
+        uses: actions/checkout@v4
+        with:
+          repository: da-roth/forge
+          path: forge
+
+      - name: Checkout QuantLib
+        uses: actions/checkout@v4
+        with:
+          repository: lballabio/QuantLib
+          path: quantlib
+
+      - name: Cache Boost
+        id: cache-boost
+        uses: actions/cache@v4
+        with:
+          path: C:/local/boost_${{ env.BOOST_VERSION }}
+          key: boost-${{ env.BOOST_VERSION }}-msvc-x64
+
+      - name: Install Boost
+        if: steps.cache-boost.outputs.cache-hit != 'true'
+        run: |
+          $boostUrl = "https://archives.boost.io/release/${{ env.BOOST_VERSION_DOT }}/source/boost_${{ env.BOOST_VERSION }}.zip"
+          $boostZip = "C:/temp/boost.zip"
+          $boostExtract = "C:/temp/boost"
+
+          New-Item -ItemType Directory -Force -Path C:/temp
+          New-Item -ItemType Directory -Force -Path C:/local
+
+          Write-Host "Downloading Boost..."
+          Invoke-WebRequest -Uri $boostUrl -OutFile $boostZip
+
+          Write-Host "Extracting Boost..."
+          Expand-Archive -Path $boostZip -DestinationPath $boostExtract
+
+          Move-Item -Path "$boostExtract/boost_${{ env.BOOST_VERSION }}" -Destination "C:/local/boost_${{ env.BOOST_VERSION }}"
+
+          Write-Host "Building Boost..."
+          cd "C:/local/boost_${{ env.BOOST_VERSION }}"
+          ./bootstrap.bat
+          ./b2 --with-test --with-system --with-filesystem --with-serialization --with-regex --with-date_time link=static runtime-link=static variant=release address-model=64 threading=multi
+        shell: pwsh
+
+      - name: Build Forge
+        run: |
+          cd forge
+          cmake -B build -S . `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-release" `
+            -DFORGE_SKIP_TESTS=ON
+          cmake --build build --config Release
+          cmake --install build --config Release
+        shell: pwsh
+
+      - name: Apply QuantLib ABool patch
+        run: |
+          cd quantlib
+          git apply ../quantlib-forge/patches/quantlib-abool.patch
+        shell: pwsh
+
+      - name: Build QuantLib with QuantLib-Forge
+        run: |
+          cd quantlib
+          cmake -B build -S . `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-release" `
+            -DBOOST_ROOT="C:/local/boost_${{ env.BOOST_VERSION }}" `
+            -DBoost_USE_STATIC_LIBS=ON `
+            -DBoost_USE_STATIC_RUNTIME=ON `
+            -DQL_BUILD_TEST_SUITE=OFF `
+            -DQL_BUILD_EXAMPLES=OFF `
+            -DQL_BUILD_BENCHMARK=OFF `
+            -DQL_ENABLE_SESSIONS=ON `
+            -DQL_NULL_AS_FUNCTIONS=ON `
+            -DQLFORGE_DISABLE_AAD=OFF `
+            -DQL_EXTERNAL_SUBDIRECTORIES="../quantlib-forge" `
+            -DQL_EXTRA_LINK_LIBRARIES="QuantLib-Forge"
+          cmake --build build --config Release
+        shell: pwsh
+
+      - name: Run QuantLib-Forge Tests
+        run: |
+          cd quantlib/build
+          # Find and run the test executable
+          $testExe = Get-ChildItem -Recurse -Filter "QuantLib-Forge_test_suite.exe" | Select-Object -First 1
+          if ($testExe) {
+            Write-Host "Running tests from: $($testExe.FullName)"
+            & $testExe.FullName --log_level=message --run_test=QuantLibForgeTests/SwapXvaTests
+          } else {
+            Write-Host "Test executable not found!"
+            exit 1
+          }
+        shell: pwsh
+
+  # Linux build job (optional, for cross-platform support)
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout quantlib-forge
+        uses: actions/checkout@v4
+        with:
+          path: quantlib-forge
+
+      - name: Checkout Forge
+        uses: actions/checkout@v4
+        with:
+          repository: da-roth/forge
+          path: forge
+
+      - name: Checkout QuantLib
+        uses: actions/checkout@v4
+        with:
+          repository: lballabio/QuantLib
+          path: quantlib
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libboost-all-dev
+
+      - name: Build Forge
+        run: |
+          cd forge
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-release" \
+            -DFORGE_SKIP_TESTS=ON
+          cmake --build build --config Release
+          cmake --install build --config Release
+
+      - name: Apply QuantLib ABool patch
+        run: |
+          cd quantlib
+          git apply ../quantlib-forge/patches/quantlib-abool.patch
+
+      - name: Build QuantLib with QuantLib-Forge
+        run: |
+          cd quantlib
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-release" \
+            -DQL_BUILD_TEST_SUITE=OFF \
+            -DQL_BUILD_EXAMPLES=OFF \
+            -DQL_BUILD_BENCHMARK=OFF \
+            -DQL_ENABLE_SESSIONS=ON \
+            -DQL_NULL_AS_FUNCTIONS=ON \
+            -DQLFORGE_DISABLE_AAD=OFF \
+            -DQL_EXTERNAL_SUBDIRECTORIES="../quantlib-forge" \
+            -DQL_EXTRA_LINK_LIBRARIES="QuantLib-Forge"
+          cmake --build build --config Release
+
+      - name: Run QuantLib-Forge Tests
+        run: |
+          cd quantlib/build
+          # Find and run the test executable
+          testExe=$(find . -name "QuantLib-Forge_test_suite" -type f | head -1)
+          if [ -n "$testExe" ]; then
+            echo "Running tests from: $testExe"
+            "$testExe" --log_level=message --run_test=QuantLibForgeTests/SwapXvaTests
+          else
+            echo "Test executable not found!"
+            exit 1
+          fi

@@ -1,0 +1,50 @@
+diff --git a/ql/cashflows/couponpricer.cpp b/ql/cashflows/couponpricer.cpp
+index abcdef1..1234567 100644
+--- a/ql/cashflows/couponpricer.cpp
++++ b/ql/cashflows/couponpricer.cpp
+@@ -32,8 +32,33 @@
+ #include <ql/termstructures/yieldtermstructure.hpp>
+ #include <ql/optional.hpp>
+ #include <utility>
++
++// Forge integration: ABool-based conditionals for Real-valued branches.
++// This relies on QuantLib being built with the Forge / expressions
++// integration so that Real exposes forgeValue()/setForgeValue().
++#include <expressions/abool.hpp>
++#include <expressions/abool_helpers.hpp>
+
+ namespace QuantLib {
++
++    namespace {
++
++        // Helper: build a Forge ABool from a Real comparison.
++        inline forge::ABool greaterReal(const Real& a, const Real& b) {
++            return forge::greater(a.forgeValue(), b.forgeValue());
++        }
++
++        // Helper: max(x, y) implemented via ABool::If so that, when Forge
++        // recording is active, the branch is represented as an OpCode::If
++        // node in the Forge graph.
++        inline Real forgeMaxReal(const Real& x, const Real& y) {
++            forge::ABool cond = greaterReal(x, y);
++            return cond.If(x, y);
++        }
++
++    } // anonymous namespace
+
+ //===========================================================================//
+ //                              IborCouponPricer                             //
+@@ -124,7 +149,12 @@ namespace QuantLib {
+                 a = effStrike;
+                 b = coupon_->indexFixing();
+             }
+-            return std::max(a - b, 0.0);
++            // Use Forge ABool-based max so that, when Forge recording is
++            // enabled, this payoff is represented as a dynamic branch in
++            // the Forge graph. When not recording, this behaves just like
++            // std::max(a - b, 0.0) via ABool's passive value.
++            Real diff = a - b;
++            return forgeMaxReal(diff, Real(0.0));
+         } else {
+             // not yet determined, use Black model
+             QL_REQUIRE(!capletVolatility().empty(),

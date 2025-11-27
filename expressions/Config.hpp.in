@@ -1,0 +1,42 @@
+/*******************************************************************************
+
+   Configuration settings for the build
+
+   This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
+
+   Copyright (C) 2025 The QuantLib-Forge Authors
+
+   Derived from XAD (https://github.com/auto-differentiation/XAD)
+   Original code: Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+
+   SPDX-License-Identifier: AGPL-3.0-or-later
+
+******************************************************************************/
+
+#pragma once
+
+/* These options can be changed in client code, after expressions has already been compiled */
+
+// Use strong inlining for higher performance - but compiles significantly slower
+#ifndef FEXPR_USE_STRONG_INLINE
+#cmakedefine FEXPR_USE_STRONG_INLINE
+#endif
+
+// Allow conversion operator from active type to integers, potentially missing some
+// AAD variable dependency tracking
+#ifndef FEXPR_ALLOW_INT_CONVERSION
+#cmakedefine FEXPR_ALLOW_INT_CONVERSION
+#endif
+
+
+/******* The following options should not be touched after compilation */
+
+// keep track of freed-up slots in the tape and re-use them
+#cmakedefine FEXPR_TAPE_REUSE_SLOTS
+
+// Disable thread-local tape usage
+#cmakedefine FEXPR_NO_THREADLOCAL
+
+// Reduce memory usage in the tape, at a slight performance cost
+#cmakedefine FEXPR_REDUCED_MEMORY
+
