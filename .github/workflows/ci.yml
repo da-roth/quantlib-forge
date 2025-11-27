@@ -14,9 +14,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
   pull_request:
-    branches: [main, master]
   workflow_dispatch:
 
 env:
@@ -24,7 +22,7 @@ env:
   BOOST_VERSION_DOT: 1.84.0
 
 jobs:
-  build-and-test:
+  build-windows:
     runs-on: windows-latest
 
     steps:
@@ -79,10 +77,9 @@ jobs:
       - name: Build Forge
         run: |
           cd forge
-          cmake -B build -S . `
+          cmake -B build -S tools/packaging `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-release" `
-            -DFORGE_SKIP_TESTS=ON
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-release"
           cmake --build build --config Release
           cmake --install build --config Release
         shell: pwsh
@@ -102,7 +99,7 @@ jobs:
             -DBOOST_ROOT="C:/local/boost_${{ env.BOOST_VERSION }}" `
             -DBoost_USE_STATIC_LIBS=ON `
             -DBoost_USE_STATIC_RUNTIME=ON `
-            -DQL_BUILD_TEST_SUITE=OFF `
+            -DQL_BUILD_TEST_SUITE=ON `
             -DQL_BUILD_EXAMPLES=OFF `
             -DQL_BUILD_BENCHMARK=OFF `
             -DQL_ENABLE_SESSIONS=ON `
@@ -116,8 +113,8 @@ jobs:
       - name: Run QuantLib-Forge Tests
         run: |
           cd quantlib/build
-          # Find and run the test executable
-          $testExe = Get-ChildItem -Recurse -Filter "QuantLib-Forge_test_suite.exe" | Select-Object -First 1
+          # Find and run the test executable (OUTPUT_NAME is quantlib-forge-test-suite)
+          $testExe = Get-ChildItem -Recurse -Filter "quantlib-forge-test-suite.exe" | Select-Object -First 1
           if ($testExe) {
             Write-Host "Running tests from: $($testExe.FullName)"
             & $testExe.FullName --log_level=message --run_test=QuantLibForgeTests/SwapXvaTests
@@ -127,9 +124,10 @@ jobs:
           }
         shell: pwsh
 
-  # Linux build job (optional, for cross-platform support)
+  # Linux build job (uses quantlib-devenv container for Boost 1.89+)
   build-linux:
     runs-on: ubuntu-latest
+    container: ghcr.io/lballabio/quantlib-devenv:rolling
 
     steps:
       - name: Checkout quantlib-forge
@@ -149,18 +147,12 @@ jobs:
           repository: lballabio/QuantLib
           path: quantlib
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libboost-all-dev
-
       - name: Build Forge
         run: |
           cd forge
-          cmake -B build -S . \
+          cmake -B build -S tools/packaging \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-release" \
-            -DFORGE_SKIP_TESTS=ON
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-release"
           cmake --build build --config Release
           cmake --install build --config Release
 
@@ -175,7 +167,7 @@ jobs:
           cmake -B build -S . \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-release" \
-            -DQL_BUILD_TEST_SUITE=OFF \
+            -DQL_BUILD_TEST_SUITE=ON \
             -DQL_BUILD_EXAMPLES=OFF \
             -DQL_BUILD_BENCHMARK=OFF \
             -DQL_ENABLE_SESSIONS=ON \
@@ -188,8 +180,8 @@ jobs:
       - name: Run QuantLib-Forge Tests
         run: |
           cd quantlib/build
-          # Find and run the test executable
-          testExe=$(find . -name "QuantLib-Forge_test_suite" -type f | head -1)
+          # Find and run the test executable (OUTPUT_NAME is quantlib-forge-test-suite)
+          testExe=$(find . -name "quantlib-forge-test-suite" -type f | head -1)
           if [ -n "$testExe" ]; then
             echo "Running tests from: $testExe"
             "$testExe" --log_level=message --run_test=QuantLibForgeTests/SwapXvaTests

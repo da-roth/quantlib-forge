@@ -1,0 +1,80 @@
+##############################################################################
+#
+#  QuantLib-Forge Benchmark Workflow - XAD
+#
+#  Builds QuantLib with XAD (QuantLib-Risks-Cpp) and runs the XVA benchmark.
+#  This measures tape-based AAD performance for comparison with Forge.
+#
+#  This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
+#
+#  Copyright (C) 2025 The QuantLib-Forge Authors
+#
+#  SPDX-License-Identifier: AGPL-3.0-or-later
+#
+##############################################################################
+
+name: Benchmark XAD
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  benchmark-xad:
+    runs-on: ubuntu-latest
+    container: ghcr.io/lballabio/quantlib-devenv:rolling
+
+    steps:
+      - name: Checkout quantlib-forge (for benchmark files)
+        uses: actions/checkout@v4
+        with:
+          path: quantlib-forge
+
+      - name: Checkout QuantLib
+        uses: actions/checkout@v4
+        with:
+          repository: lballabio/QuantLib
+          path: QuantLib
+
+      - name: Checkout XAD
+        uses: actions/checkout@v4
+        with:
+          repository: auto-differentiation/xad
+          path: xad
+
+      - name: Checkout QuantLib-Risks-Cpp
+        uses: actions/checkout@v4
+        with:
+          repository: auto-differentiation/QuantLib-Risks-Cpp
+          path: QuantLib-Risks-Cpp
+
+      - name: Setup
+        run: |
+          apt-get update && apt-get install -y ninja-build
+
+      - name: Configure
+        run: |
+          cd QuantLib
+          mkdir build
+          cd build
+          cmake -G Ninja -DBOOST_ROOT=/usr \
+            -DQLRISKS_DISABLE_AAD=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DQL_EXTERNAL_SUBDIRECTORIES="$(pwd)/../../xad;$(pwd)/../../QuantLib-Risks-Cpp" \
+            -DQL_EXTRA_LINK_LIBRARIES=QuantLib-Risks \
+            -DQL_NULL_AS_FUNCTIONS=ON \
+            ..
+
+      - name: Compile
+        run: |
+          cd QuantLib/build
+          cmake --build .
+
+      - name: Run XAD Benchmark
+        run: |
+          cd QuantLib/build
+          echo "============================================================="
+          echo "  XAD Benchmark - QuantLib with XAD (tape-based AAD)"
+          echo "============================================================="
+          ./QuantLib-Risks-Cpp/test-suite/quantlib-risks-test-suite \
+            --log_level=message \
+            --run_test=QuantLibRisksTests/SwapXvaOriginalTests

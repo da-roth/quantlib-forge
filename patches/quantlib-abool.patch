@@ -1,20 +1,19 @@
 diff --git a/ql/cashflows/couponpricer.cpp b/ql/cashflows/couponpricer.cpp
-index abcdef1..1234567 100644
+index 56e05bb..4731dc4 100644
 --- a/ql/cashflows/couponpricer.cpp
 +++ b/ql/cashflows/couponpricer.cpp
-@@ -32,8 +32,33 @@
- #include <ql/termstructures/yieldtermstructure.hpp>
+@@ -34,8 +34,31 @@
  #include <ql/optional.hpp>
  #include <utility>
-+
+ 
 +// Forge integration: ABool-based conditionals for Real-valued branches.
 +// This relies on QuantLib being built with the Forge / expressions
 +// integration so that Real exposes forgeValue()/setForgeValue().
 +#include <expressions/abool.hpp>
 +#include <expressions/abool_helpers.hpp>
-
- namespace QuantLib {
 +
+ namespace QuantLib {
+ 
 +    namespace {
 +
 +        // Helper: build a Forge ABool from a Real comparison.
@@ -31,10 +30,11 @@ index abcdef1..1234567 100644
 +        }
 +
 +    } // anonymous namespace
-
++
  //===========================================================================//
  //                              IborCouponPricer                             //
-@@ -124,7 +149,12 @@ namespace QuantLib {
+ //===========================================================================//
+@@ -143,7 +166,12 @@ namespace QuantLib {
                  a = effStrike;
                  b = coupon_->indexFixing();
              }
@@ -48,3 +48,8 @@ index abcdef1..1234567 100644
          } else {
              // not yet determined, use Black model
              QL_REQUIRE(!capletVolatility().empty(),
+@@ -478,3 +506,4 @@ namespace QuantLib {
+ 
+ 
+ }
++
