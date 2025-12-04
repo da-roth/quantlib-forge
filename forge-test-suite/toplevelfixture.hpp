@@ -2,7 +2,7 @@
 
 /*******************************************************************************
 
-   Top-level test fixture for QuantLib-Forge tests.
+   Top-level test fixture for QuantLib-Forge Risks tests.
 
    This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
 

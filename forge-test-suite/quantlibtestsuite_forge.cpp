@@ -2,7 +2,7 @@
 
 /*******************************************************************************
 
-   Test suite main entry point for QuantLib-Forge.
+   Test suite main entry point for QuantLib-Forge Risks tests.
 
    This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
 
@@ -17,7 +17,7 @@
 
 ******************************************************************************/
 
-#define BOOST_TEST_MODULE QuantLibForgeTests
+#define BOOST_TEST_MODULE QuantLibForgeRisksTests
 
 #include <boost/test/included/unit_test.hpp>
 

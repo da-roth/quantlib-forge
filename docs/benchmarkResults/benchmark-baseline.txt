@@ -14,12 +14,12 @@ Running Test 1: Simple (10 RF)...
 +----------------------------+--------------------+
 | Metric                     |               Value|
 +----------------------------+--------------------+
-| Total Time (ms)            |                2.79|
-| Avg Time/Iteration (ms)    |                0.56|
+| Total Time (ms)            |                1.35|
+| Avg Time/Iteration (ms)    |                0.27|
 | # Scenarios                |                   1|
 | # Evaluations              |                  11|
 | Evals/Scenario             |                  11|
-| Time/Scenario (us)         |              558.00|
+| Time/Scenario (us)         |              269.40|
 +----------------------------+--------------------+
 | Expected Exposure          |          3.7407e+04|
 | CVA                        |          2.9926e+02|
@@ -44,12 +44,12 @@ Running Test 2: Full RF (100 RF)...
 +----------------------------+--------------------+
 | Metric                     |               Value|
 +----------------------------+--------------------+
-| Total Time (ms)            |               25.48|
-| Avg Time/Iteration (ms)    |                5.10|
+| Total Time (ms)            |               12.61|
+| Avg Time/Iteration (ms)    |                2.52|
 | # Scenarios                |                   1|
 | # Evaluations              |                 101|
 | Evals/Scenario             |                 101|
-| Time/Scenario (us)         |             5095.20|
+| Time/Scenario (us)         |             2521.00|
 +----------------------------+--------------------+
 | Expected Exposure          |          4.1649e+04|
 | CVA                        |          3.3319e+02|
@@ -74,12 +74,12 @@ Running Test 3: Time Steps (3 steps)...
 +----------------------------+--------------------+
 | Metric                     |               Value|
 +----------------------------+--------------------+
-| Total Time (ms)            |               59.54|
-| Avg Time/Iteration (ms)    |               11.91|
+| Total Time (ms)            |               29.34|
+| Avg Time/Iteration (ms)    |                5.87|
 | # Scenarios                |                   3|
 | # Evaluations              |                 303|
 | Evals/Scenario             |                 101|
-| Time/Scenario (us)         |             3969.33|
+| Time/Scenario (us)         |             1956.13|
 +----------------------------+--------------------+
 | Expected Exposure          |          2.7678e+04|
 | CVA                        |          2.2142e+02|
@@ -104,12 +104,12 @@ Running Test 4: MC 10 paths...
 +----------------------------+--------------------+
 | Metric                     |               Value|
 +----------------------------+--------------------+
-| Total Time (ms)            |              584.68|
-| Avg Time/Iteration (ms)    |              116.94|
+| Total Time (ms)            |              288.13|
+| Avg Time/Iteration (ms)    |               57.63|
 | # Scenarios                |                  30|
 | # Evaluations              |                3030|
 | Evals/Scenario             |                 101|
-| Time/Scenario (us)         |             3897.81|
+| Time/Scenario (us)         |             1920.83|
 +----------------------------+--------------------+
 | Expected Exposure          |          3.4645e+04|
 | CVA                        |          2.7716e+02|
@@ -134,12 +134,12 @@ Running Test 5: MC 100 paths...
 +----------------------------+--------------------+
 | Metric                     |               Value|
 +----------------------------+--------------------+
-| Total Time (ms)            |             4289.48|
-| Avg Time/Iteration (ms)    |              857.90|
+| Total Time (ms)            |             2875.59|
+| Avg Time/Iteration (ms)    |              575.12|
 | # Scenarios                |                 300|
 | # Evaluations              |               30300|
 | Evals/Scenario             |                 101|
-| Time/Scenario (us)         |             2859.61|
+| Time/Scenario (us)         |             1917.02|
 +----------------------------+--------------------+
 | Expected Exposure          |          3.1850e+04|
 | CVA                        |          2.5480e+02|
@@ -164,12 +164,12 @@ Running Test 6: Full Scale (1000 paths)...
 +----------------------------+--------------------+
 | Metric                     |               Value|
 +----------------------------+--------------------+
-| Total Time (ms)            |            43158.60|
-| Avg Time/Iteration (ms)    |             8631.72|
+| Total Time (ms)            |            29473.37|
+| Avg Time/Iteration (ms)    |             5894.67|
 | # Scenarios                |                3000|
 | # Evaluations              |              303000|
 | Evals/Scenario             |                 101|
-| Time/Scenario (us)         |             2877.22|
+| Time/Scenario (us)         |             1964.88|
 +----------------------------+--------------------+
 | Expected Exposure          |          3.2617e+04|
 | CVA                        |          2.6094e+02|
@@ -187,3 +187,6 @@ Running Test 6: Full Scale (1000 paths)...
 =============================================================
   Baseline benchmark completed successfully.
 =============================================================
+
+=============================================
+  Benchmark Complete

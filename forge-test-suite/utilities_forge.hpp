@@ -2,7 +2,7 @@
 
 /*******************************************************************************
 
-   Test utilities for QuantLib-Forge.
+   Test utilities for QuantLib-Forge Risks test suite.
 
    This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
 
@@ -65,7 +65,7 @@ using QuantLib::value;
 #define LENGTH(a) (sizeof(a) / sizeof(a[0]))
 
 // make test names pretty before registering them
-#define QLFORGE_TEST_CASE(f)                                        \
+#define QLFORGE_RISKS_TEST_CASE(f)                                  \
     BOOST_TEST_CASE_NAME(QuantLib::detail::quantlib_test_case(f), \
                          QuantLib::detail::extract_test_name(BOOST_STRINGIZE(f)))
 

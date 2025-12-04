@@ -1,9 +1,10 @@
 ##############################################################################
 #
-#  QuantLib-Forge Benchmark Workflow - Forge
+#  QuantLib-Forge Benchmark Workflow
 #
-#  Builds QuantLib with Forge and runs the XVA benchmark.
-#  This measures JIT + AAD performance for comparison with baseline and XAD.
+#  Builds QuantLib with Forge and runs the comprehensive XVA benchmark
+#  that compares ALL approaches: Bump-Reval, Forward-Only, and AAD,
+#  with SSE2 vs AVX2 and different optimization levels.
 #
 #  This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
 #
@@ -40,10 +41,28 @@ jobs:
         with:
           repository: lballabio/QuantLib
           path: QuantLib
+          fetch-depth: 0
+
+      - name: Pin QuantLib to pre-multicurve commit
+        run: |
+          cd QuantLib
+          git checkout b3612ef
 
       - name: Setup
         run: |
           apt-get update && apt-get install -y ninja-build
+
+      - name: Check CPU capabilities
+        run: |
+          echo "============================================================="
+          echo "  CPU Capabilities"
+          echo "============================================================="
+          cat /proc/cpuinfo | grep -m1 "model name" || true
+          echo ""
+          echo "AVX2 support:"
+          grep -q avx2 /proc/cpuinfo && echo "  AVX2: SUPPORTED" || echo "  AVX2: NOT SUPPORTED"
+          grep -q avx /proc/cpuinfo && echo "  AVX:  SUPPORTED" || echo "  AVX:  NOT SUPPORTED"
+          grep -q sse2 /proc/cpuinfo && echo "  SSE2: SUPPORTED" || echo "  SSE2: NOT SUPPORTED"
 
       - name: Build Forge
         run: |
@@ -55,11 +74,6 @@ jobs:
           cmake --build build --config Release
           cmake --install build --config Release
 
-      - name: Apply QuantLib ABool patch
-        run: |
-          cd QuantLib
-          git apply ../quantlib-forge/patches/quantlib-abool.patch
-
       - name: Configure QuantLib with QuantLib-Forge
         run: |
           cd QuantLib
@@ -68,12 +82,15 @@ jobs:
           cmake -G Ninja -DBOOST_ROOT=/usr \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH=${{ github.workspace }}/install \
+            -DCMAKE_CXX_FLAGS="-Wno-reorder" \
             -DQL_BUILD_TEST_SUITE=OFF \
             -DQL_BUILD_EXAMPLES=OFF \
             -DQL_BUILD_BENCHMARK=OFF \
             -DQL_ENABLE_SESSIONS=ON \
             -DQL_NULL_AS_FUNCTIONS=ON \
-            -DQLFORGE_DISABLE_AAD=OFF \
+            -DQL_FORGE_DISABLE_AAD=OFF \
+            -DQL_FORGE_BUILD_TEST_SUITE=OFF \
+            -DQL_FORGE_BUILD_TEST_SUITE=OFF \
             -DQL_EXTERNAL_SUBDIRECTORIES="../quantlib-forge" \
             -DQL_EXTRA_LINK_LIBRARIES="QuantLib-Forge" \
             ..
@@ -88,18 +105,19 @@ jobs:
           cd QuantLib/build
           cmake --install . --prefix ${{ github.workspace }}/install
 
-      - name: Build Forge Benchmark
+      - name: Build Comprehensive Forge Benchmark
         run: |
           mkdir benchmark-build
           cd benchmark-build
           cat > CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.15)
-          project(SwapXvaForge LANGUAGES CXX)
+          project(SwapXvaForgeAll LANGUAGES CXX)
           find_package(QuantLib REQUIRED)
           find_package(Forge CONFIG REQUIRED)
-          add_executable(swap_xva_forge $ENV{GITHUB_WORKSPACE}/quantlib-forge/benchmarks/swap_xva_forge.cpp)
-          target_link_libraries(swap_xva_forge PRIVATE QuantLib::QuantLib Forge::forge)
-          target_compile_features(swap_xva_forge PUBLIC cxx_std_17)
+          add_executable(swap_xva_forge_all $ENV{GITHUB_WORKSPACE}/quantlib-forge/benchmarks/swap_xva_forge_all.cpp)
+          target_link_libraries(swap_xva_forge_all PRIVATE QuantLib::QuantLib Forge::forge)
+          target_compile_features(swap_xva_forge_all PUBLIC cxx_std_17)
+          target_compile_options(swap_xva_forge_all PRIVATE -mavx2)
           EOF
           cmake -G Ninja -DBOOST_ROOT=/usr \
             -DCMAKE_BUILD_TYPE=Release \
@@ -111,6 +129,7 @@ jobs:
         run: |
           cd benchmark-build
           echo "============================================================="
-          echo "  Forge Benchmark - QuantLib with Forge (JIT + AAD)"
+          echo "  Forge Benchmark - All Approaches"
           echo "============================================================="
-          ./swap_xva_forge
+          ./swap_xva_forge_all
+

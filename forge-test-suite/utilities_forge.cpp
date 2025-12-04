@@ -2,7 +2,7 @@
 
 /*******************************************************************************
 
-   Test utilities implementation for QuantLib-Forge.
+   Test utilities implementation for QuantLib-Forge Risks test suite.
 
    This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
 

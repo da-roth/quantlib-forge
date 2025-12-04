@@ -1,0 +1,99 @@
+=============================================================
+  BARRIER RE-EVALUATION TEST - PATCHED
+=============================================================
+
+This test demonstrates successful kernel reuse:
+  - Kernel is compiled with Input Set 1 (strike=100 > barrier)
+  - Re-evaluated with Input Set 5 (strike=80 < barrier=95)
+  - With Forge-aware patches, ABool::If records all branches
+  - Expected: ALL input sets PASS
+
+Patches applied:
+  - ErrorFunction: ABool::If for 4 branch regions
+  - CumulativeNormalDistribution: ABool::If for asymptotic branch
+  - AnalyticBarrierEngine: ABool::If for strike/barrier conditions
+
+=============================================================
+
+Running 1 test case...
+KERNEL REUSE TEST: Compile once, evaluate with multiple input sets...
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 1)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 2)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 3)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 4)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 5)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 6)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 7)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 8)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 9)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 10)
+  Graph has 956 nodes
+  Kernel compiled once, now testing with different inputs...
+  --- Input Set 1 ---
+    strike=100, u=90, r=0.10000000000000001, b=0.10000000000000001, v=0.10000000000000001
+    Expected price: -0.48374180359594732
+    Forge price: -0.48374180359594732
+    Price diff: 0%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.90483741803595941 vs -0.90483737835711509
+      d/dU: 0.99999999999999989 vs 0.99999994063182385
+      d/dR: 90.483741803595933 vs 90.48373726727732
+      d/dB: 0 vs 0
+      d/dV: 0 vs 0
+    Input Set 1: PASSED
+  --- Input Set 2 ---
+    strike=100, u=95, r=0.050000000000000003, b=0.050000000000000003, v=0.20000000000000001
+    Expected price: -0.12294245007139182
+    Forge price: -0.12294245007139182
+    Price diff: 0%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.95122942450071379 vs -0.95122942411762779
+      d/dU: 0.99999999999999989 vs 0.99999994063182385
+      d/dR: 95.122942450071378 vs 95.122937580072175
+      d/dB: 0 vs 0
+      d/dV: 0 vs 0
+
+*** No errors detected
+    Input Set 2: PASSED
+  --- Input Set 3 ---
+    strike=110, u=100, r=0.080000000000000002, b=0.080000000000000002, v=0.25
+    Expected price: -1.5427981025299289
+    Forge price: -1.5427981025299289
+    Price diff: 0%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.92311634638663564 vs -0.92311637445163797
+      d/dU: 0.99999999999999989 vs 0.99999994063182385
+      d/dR: 101.5427981025299 vs 101.54279280527589
+      d/dB: 0 vs 0
+      d/dV: 0 vs 0
+    Input Set 3: PASSED
+  --- Input Set 4 ---
+    strike=90, u=85, r=0.029999999999999999, b=0.029999999999999999, v=0.14999999999999999
+    Expected price: -2.3400980193657404
+    Forge price: -2.3400980193657404
+    Price diff: 0%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.97044553354850804 vs -0.97044534186352394
+      d/dU: 0.99999999999999989 vs 0.99999994063182385
+      d/dR: 87.340098019365712 vs 87.340093557486398
+      d/dB: 0 vs 0
+      d/dV: 0 vs 0
+    Input Set 4: PASSED
+  --- Input Set 5 ---
+    strike=80, u=100, r=0.050000000000000003, b=95, v=0.20000000000000001
+    Expected price: 22.732246481672902
+    Forge price: 22.732246481672902
+    Price diff: 0%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.62571876905288715 vs -0.62571878345352161
+      d/dU: 0.98994534479858154 vs 0.98994519248662982
+      d/dR: 76.262287998185258 vs 76.26228828883086
+      d/dB: -0.27583985762057145 vs -0.27583986650370207
+      d/dV: 17.300405132934188 vs 17.300412906706697
+    Input Set 5: PASSED
+  Kernel reuse test completed with 5 input sets
+
+=============================================================
+  SUCCESS: All input sets passed!
+  Kernel reuse works correctly with Forge-aware patches.
+=============================================================

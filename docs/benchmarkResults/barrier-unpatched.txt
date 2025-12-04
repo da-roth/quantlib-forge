@@ -1,0 +1,101 @@
+Run cd quantlib/build
+=============================================================
+  BARRIER RE-EVALUATION TEST - UNPATCHED
+=============================================================
+
+This test demonstrates the kernel reuse problem:
+  - Kernel is compiled with Input Set 1 (strike=100 > barrier)
+  - Re-evaluated with Input Set 5 (strike=80 < barrier=95)
+  - Without Forge-aware patches, branch conditions are baked in
+  - Expected: Input Set 5 FAILS with large error (~144%)
+
+=============================================================
+
+Running 1 test case...
+KERNEL REUSE TEST: Compile once, evaluate with multiple input sets...
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 1)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 2)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 3)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 4)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 5)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 6)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 7)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 8)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 9)
+Warning: arning] AReal::value() called while Forge recording is active on an active value – this drops you out of the Forge graph (occurrence 10)
+  Graph has 523 nodes
+  Kernel compiled once, now testing with different inputs...
+  --- Input Set 1 ---
+    strike=100, u=90, r=0.10000000000000001, b=0.10000000000000001, v=0.10000000000000001
+    Expected price: 3.3619241787653706
+    Forge price: 3.3619241787653706
+    Price diff: 0%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.41508633656843064 vs -0.41508634751608042
+      d/dU: 0.49856175372898254 vs 0.49856168971018633
+      d/dR: 41.50863365684306 vs 41.508649459842673
+      d/dB: 0 vs 0
+      d/dV: 35.904571906746433 vs 35.904571902278803
+    Input Set 1: PASSED
+  --- Input Set 2 ---
+    strike=100, u=95, r=0.050000000000000003, b=0.050000000000000003, v=0.20000000000000001
+    Expected price: 7.5108721783527059
+    Forge price: 7.5108721783527059
+    Price diff: 0%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.43528841364206317 vs -0.43528842752493802
+      d/dU: 0.53726014255325283 vs 0.53726004978216224
+      d/dR: 43.528841364206322 vs 43.528848578944235
+      d/dB: 0 vs 0
+      d/dV: 37.734096341460955 vs 37.734096309804954
+    Input Set 2: PASSED
+  --- Input Set 3 ---
+    strike=110, u=100, r=0.080000000000000002, b=0.080000000000000002, v=0.25
+    Expected price: 9.2716758013372385
+    Forge price: 9.2716758013372385
+    Price diff: 0%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.39336571931419428 vs -0.39336576662662992
+      d/dU: 0.52541904925898608 vs 0.5254190682535409
+      d/dR: 43.270229124561368 vs 43.270234755254933
+      d/dB: 0 vs 0
+      d/dV: 39.813220473746661 vs 39.81322031165746
+    Input Set 3: PASSED
+  --- Input Set 4 ---
+    strike=90, u=85, r=0.029999999999999999, b=0.029999999999999999, v=0.14999999999999999
+    Expected price: 4.0656978030552224
+    Forge price: 4.0656978030552224
+    Price diff: 0%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.38716289702792933 vs -0.3871628706519914
+      d/dU: 0.45776892394786894 vs 0.45776879176173679
+      d/dR: 34.844660732513638 vs 34.844670224742913
+      d/dB: 0 vs 0
+      d/dV: 33.719920515262046 vs 33.719920793373603
+    Input Set 4: PASSED
+  --- Input Set 5 ---
+    strike=80, u=100, r=0.050000000000000003, b=95, v=0.20000000000000001
+    Expected price: 10.079521393487731
+    Forge price: 24.588835443893785
+    Price diff: 143.94844243081189%
+    Derivatives - Forge vs Bumping:
+      d/dStrike: -0.85343631023359168 vs -0.22266540611326491
+      d/dU: 0.92863740262581118 vs 1.8907537224777116
+      d/dR: 68.274904818687347 vs 50.263239046444141
+      d/dB: 0 vs -1.6966593108236339
+      d/dV: 13.627194368899943 vs -29.666281946560957
+/__w/quantlib-forge-company/quantlib-forge-company/quantlib-forge/test-suite-risks-modified/barrieroption_forge_abool.cpp(4313): error: in "QuantLibForgeRisksTests/BarrierOptionForgeTest/testForgeBarrierKernelReuse": difference{1.43948} between expectedVal{10.079521393487731} and forgePrice{24.588835443893785} exceeds 1e-06%
+/__w/quantlib-forge-company/quantlib-forge-company/quantlib-forge/test-suite-risks-modified/barrieroption_forge_abool.cpp(4316): error: in "QuantLibForgeRisksTests/BarrierOptionForgeTest/testForgeBarrierKernelReuse": difference{2.83282} between value(value(derivatives_bumping.strike)){-0.22266540611326491} and value(gradients[0]){-0.85343631023359168} exceeds 0.001%
+/__w/quantlib-forge-company/quantlib-forge-company/quantlib-forge/test-suite-risks-modified/barrieroption_forge_abool.cpp(4317): error: in "QuantLibForgeRisksTests/BarrierOptionForgeTest/testForgeBarrierKernelReuse": difference{1.03605} between value(value(derivatives_bumping.u)){1.8907537224777116} and value(gradients[1]){0.92863740262581118} exceeds 0.001%
+/__w/quantlib-forge-company/quantlib-forge-company/quantlib-forge/test-suite-risks-modified/barrieroption_forge_abool.cpp(4318): error: in "QuantLibForgeRisksTests/BarrierOptionForgeTest/testForgeBarrierKernelReuse": difference{0.358347} between value(value(derivatives_bumping.r)){50.263239046444141} and value(gradients[2]){68.274904818687347} exceeds 0.001%
+/__w/quantlib-forge-company/quantlib-forge-company/quantlib-forge/test-suite-risks-modified/barrieroption_forge_abool.cpp(4319): error: in "QuantLibForgeRisksTests/BarrierOptionForgeTest/testForgeBarrierKernelReuse": difference{1.79769e+308} between value(value(derivatives_bumping.b)){-1.6966593108236339} and value(gradients[3]){0} exceeds 0.001%
+/__w/quantlib-forge-company/quantlib-forge-company/quantlib-forge/test-suite-risks-modified/barrieroption_forge_abool.cpp(4320): error: in "QuantLibForgeRisksTests/BarrierOptionForgeTest/testForgeBarrierKernelReuse": difference{3.17699} between value(value(derivatives_bumping.v)){-29.666281946560957} and value(gradients[4]){13.627194368899943} exceeds 0.001%
+    Input Set 5: FAILED
+  Kernel reuse test completed with 5 input sets
+
+*** 6 failures are detected in the test module "QuantLibForgeRisksTests"
+
+=============================================================
+  EXPECTED RESULT: Input Set 5 should FAIL
+  This demonstrates why Forge-aware patches are needed.
+=============================================================

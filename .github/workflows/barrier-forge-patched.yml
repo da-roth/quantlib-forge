@@ -1,0 +1,139 @@
+##############################################################################
+#
+#  Barrier Forge Test - Patched (Expected to PASS)
+#
+#  This workflow demonstrates successful kernel reuse WITH Forge-aware
+#  patches. All conditional branches use ABool::If, allowing Forge to
+#  record all paths and re-evaluate correctly when inputs change.
+#
+#  Expected behavior: All 5 input sets should PASS
+#
+#  Patches applied:
+#    - errorfunction_forge.hpp/cpp - Forge-aware error function
+#    - normaldistribution_forge.hpp/cpp - Forge-aware CDF with asymptotic branch
+#    - analyticbarrierengine.cpp - Forge-aware barrier engine
+#
+#  Copyright (C) 2025 The QuantLib-Forge Authors
+#
+#  SPDX-License-Identifier: AGPL-3.0-or-later
+#
+##############################################################################
+
+name: Barrier Forge (Patched - Expected PASS)
+
+on:
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  test-patched:
+    runs-on: ubuntu-latest
+    container: ghcr.io/lballabio/quantlib-devenv:rolling
+
+    steps:
+      - name: Checkout quantlib-forge
+        uses: actions/checkout@v4
+        with:
+          path: quantlib-forge
+
+      - name: Checkout Forge
+        uses: actions/checkout@v4
+        with:
+          repository: da-roth/forge
+          path: forge
+
+      - name: Checkout QuantLib
+        uses: actions/checkout@v4
+        with:
+          repository: lballabio/QuantLib
+          path: quantlib
+          fetch-depth: 0
+
+      - name: Pin QuantLib to pre-multicurve commit
+        run: |
+          cd quantlib
+          git checkout b3612ef
+
+      - name: Setup
+        run: |
+          apt-get update && apt-get install -y ninja-build
+
+      - name: Build Forge
+        run: |
+          cd forge
+          cmake -B build -S tools/packaging \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-release"
+          cmake --build build --config Release
+          cmake --install build --config Release
+
+      - name: Apply QuantLib patches
+        run: |
+          cd quantlib
+          echo "Applying QuantLib ABool patch..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-abool.patch
+          echo "Applying Forge-aware ErrorFunction patches..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-errorfunction.hpp.patch
+          git apply ../quantlib-forge/patches/quantlib/quantlib-errorfunction.cpp.patch
+          echo "Applying Forge-aware NormalDistribution patches..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-normaldistribution.hpp.patch
+          git apply ../quantlib-forge/patches/quantlib/quantlib-normaldistribution.cpp.patch
+          echo "Applying Forge-aware AnalyticBarrierEngine patch..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-analyticbarrierengine.cpp.patch
+          echo "All QuantLib patches applied."
+
+      - name: Switch test file to ABool version
+        run: |
+          sed -i 's/barrieroption_forge\.cpp/barrieroption_forge_abool.cpp/' quantlib-forge/forge-test-suite/CMakeLists.txt
+
+      - name: Build QuantLib (Patched)
+        run: |
+          cd quantlib
+          cmake -B build -S . \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-release" \
+            -DCMAKE_CXX_FLAGS="-Wno-reorder" \
+            -DQL_BUILD_TEST_SUITE=OFF \
+            -DQL_BUILD_EXAMPLES=OFF \
+            -DQL_BUILD_BENCHMARK=OFF \
+            -DQL_ENABLE_SESSIONS=OFF \
+            -DQL_NULL_AS_FUNCTIONS=ON \
+            -DQL_FORGE_DISABLE_AAD=OFF \
+            -DQL_FORGE_BUILD_TEST_SUITE=OFF \
+            -DQL_FORGE_BUILD_TEST_SUITE=ON \
+            -DQL_EXTERNAL_SUBDIRECTORIES="../quantlib-forge" \
+            -DQL_EXTRA_LINK_LIBRARIES="QuantLib-Forge"
+          cmake --build build --config Release
+
+      - name: Run Barrier Forge Test (Expected to PASS)
+        run: |
+          cd quantlib/build
+          TEST_EXE=$(find . -name "forge-test-suite" -type f -executable | head -1)
+
+          echo "============================================================="
+          echo "  BARRIER FORGE TEST - PATCHED"
+          echo "============================================================="
+          echo ""
+          echo "This test demonstrates successful kernel reuse:"
+          echo "  - Kernel is compiled with Input Set 1 (strike=100 > barrier)"
+          echo "  - Re-evaluated with Input Set 5 (strike=80 < barrier=95)"
+          echo "  - With Forge-aware patches, ABool::If records all branches"
+          echo "  - Expected: ALL input sets PASS"
+          echo ""
+          echo "Patches applied:"
+          echo "  - ErrorFunction: ABool::If for 4 branch regions"
+          echo "  - CumulativeNormalDistribution: ABool::If for asymptotic branch"
+          echo "  - AnalyticBarrierEngine: ABool::If for strike/barrier conditions"
+          echo ""
+          echo "============================================================="
+          echo ""
+
+          # Run the test - all should pass
+          $TEST_EXE --log_level=message --run_test=QuantLibForgeRisksTests/BarrierOptionForgeTest/testForgeBarrierKernelReuse
+
+          echo ""
+          echo "============================================================="
+          echo "  SUCCESS: All input sets passed!"
+          echo "  Kernel reuse works correctly with Forge-aware patches."
+          echo "============================================================="

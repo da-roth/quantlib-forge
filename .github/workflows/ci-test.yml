@@ -1,9 +1,9 @@
 ##############################################################################
 #
-#  QuantLib-Forge CI Build Workflow
+#  QuantLib-Forge CI Test Workflow
 #
-#  Fast build verification on Linux and Windows (no tests, no patches).
-#  This workflow verifies that the code compiles correctly on both platforms.
+#  Full build with tests on Linux and Windows.
+#  Applies all Forge-aware patches and runs the test suites.
 #
 #  This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
 #
@@ -13,13 +13,13 @@
 #
 ##############################################################################
 
-name: CI Build
+name: CI Test
 
-run-name: "CI Build: ${{ github.event.head_commit.message || github.ref_name }}"
+run-name: "CI Test: ${{ github.event.head_commit.message || github.ref_name }}"
 
 on:
   push:
-  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 env:
@@ -27,7 +27,7 @@ env:
   BOOST_VERSION_DOT: 1.84.0
 
 jobs:
-  build:
+  test:
     strategy:
       fail-fast: false
       matrix:
@@ -129,7 +129,42 @@ jobs:
           cmake --install build --config Release
         shell: pwsh
 
-      # Build QuantLib - Linux
+      # Apply all QuantLib patches - Linux
+      - name: Apply QuantLib patches (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd quantlib
+          echo "Applying QuantLib ABool patch..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-abool.patch
+          echo "Applying Forge-aware ErrorFunction patches..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-errorfunction.hpp.patch
+          git apply ../quantlib-forge/patches/quantlib/quantlib-errorfunction.cpp.patch
+          echo "Applying Forge-aware NormalDistribution patches..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-normaldistribution.hpp.patch
+          git apply ../quantlib-forge/patches/quantlib/quantlib-normaldistribution.cpp.patch
+          echo "Applying Forge-aware AnalyticBarrierEngine patch..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-analyticbarrierengine.cpp.patch
+          echo "All QuantLib patches applied."
+
+      # Apply all QuantLib patches - Windows
+      - name: Apply QuantLib patches (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd quantlib
+          Write-Host "Applying QuantLib ABool patch..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-abool.patch
+          Write-Host "Applying Forge-aware ErrorFunction patches..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-errorfunction.hpp.patch
+          git apply ../quantlib-forge/patches/quantlib/quantlib-errorfunction.cpp.patch
+          Write-Host "Applying Forge-aware NormalDistribution patches..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-normaldistribution.hpp.patch
+          git apply ../quantlib-forge/patches/quantlib/quantlib-normaldistribution.cpp.patch
+          Write-Host "Applying Forge-aware AnalyticBarrierEngine patch..."
+          git apply ../quantlib-forge/patches/quantlib/quantlib-analyticbarrierengine.cpp.patch
+          Write-Host "All QuantLib patches applied."
+        shell: pwsh
+
+      # Build QuantLib with tests - Linux
       - name: Build QuantLib with QuantLib-Forge (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -142,15 +177,15 @@ jobs:
             -DQL_BUILD_TEST_SUITE=OFF \
             -DQL_BUILD_EXAMPLES=OFF \
             -DQL_BUILD_BENCHMARK=OFF \
-            -DQL_ENABLE_SESSIONS=OFF \
+            -DQL_ENABLE_SESSIONS=ON \
             -DQL_NULL_AS_FUNCTIONS=ON \
             -DQL_FORGE_DISABLE_AAD=OFF \
-            -DQL_FORGE_BUILD_TEST_SUITE=OFF \
+            -DQL_FORGE_BUILD_TEST_SUITE=ON \
             -DQL_EXTERNAL_SUBDIRECTORIES="../quantlib-forge" \
             -DQL_EXTRA_LINK_LIBRARIES="QuantLib-Forge"
           cmake --build build --config Release
 
-      # Build QuantLib - Windows
+      # Build QuantLib with tests - Windows
       - name: Build QuantLib with QuantLib-Forge (Windows)
         if: matrix.os == 'windows-latest'
         run: |
@@ -164,19 +199,59 @@ jobs:
             -DQL_BUILD_TEST_SUITE=OFF `
             -DQL_BUILD_EXAMPLES=OFF `
             -DQL_BUILD_BENCHMARK=OFF `
-            -DQL_ENABLE_SESSIONS=OFF `
+            -DQL_ENABLE_SESSIONS=ON `
             -DQL_NULL_AS_FUNCTIONS=ON `
             -DQL_FORGE_DISABLE_AAD=OFF `
-            -DQL_FORGE_BUILD_TEST_SUITE=OFF `
+            -DQL_FORGE_BUILD_TEST_SUITE=ON `
             -DQL_EXTERNAL_SUBDIRECTORIES="../quantlib-forge" `
             -DQL_EXTRA_LINK_LIBRARIES="QuantLib-Forge"
           cmake --build build --config Release
         shell: pwsh
 
-      - name: Build Success
+      # Run tests - Linux
+      - name: Run Forge Test Suite (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
+          cd quantlib/build
+          TEST_EXE=$(find . -name "forge-test-suite" -type f -executable | head -1)
+
           echo "============================================================="
-          echo "  Build Successful on ${{ matrix.os }}"
-          echo "  QuantLib-Forge compiled without errors"
+          echo "  Running QuantLib-Forge Tests on Linux"
           echo "============================================================="
-        shell: bash
+
+          if [ -n "$TEST_EXE" ]; then
+            $TEST_EXE --log_level=message
+          else
+            echo "Test executable not found!"
+            exit 1
+          fi
+
+          echo ""
+          echo "============================================================="
+          echo "  Tests Passed on Linux"
+          echo "============================================================="
+
+      # Run tests - Windows
+      - name: Run Forge Test Suite (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd quantlib/build
+          $testExe = Get-ChildItem -Recurse -Filter "forge-test-suite.exe" | Select-Object -First 1
+
+          Write-Host "============================================================="
+          Write-Host "  Running QuantLib-Forge Tests on Windows"
+          Write-Host "============================================================="
+
+          if ($testExe) {
+            Write-Host "Running tests from: $($testExe.FullName)"
+            & $testExe.FullName --log_level=message
+          } else {
+            Write-Host "Test executable not found!"
+            exit 1
+          }
+
+          Write-Host ""
+          Write-Host "============================================================="
+          Write-Host "  Tests Passed on Windows"
+          Write-Host "============================================================="
+        shell: pwsh
