@@ -558,6 +558,11 @@ namespace {
 
         using tape_type = Real::tape_type;
 
+        // Create tape ONCE outside the path loop for efficiency.
+        // This allows memory reuse during path-wise evaluation instead of
+        // re-constructing the tape for every path.
+        tape_type tape;
+
         for (Size s = 0; s < config.numSwaps; ++s) {
             results.exposures[s].resize(config.numTimeSteps);
             results.sensitivities[s].resize(config.numTimeSteps);
@@ -572,7 +577,10 @@ namespace {
 
                     auto tapeStart = std::chrono::high_resolution_clock::now();
 
-                    tape_type tape;
+                    // Clear the tape at the start of each path.
+                    // This resets the tape to initial state but keeps allocated memory,
+                    // avoiding repeated allocation/deallocation overhead.
+                    tape.clearAll();
 
                     std::vector<Real> allInputs(config.numRiskFactors);
                     for (Size i = 0; i < config.numRiskFactors; ++i) {

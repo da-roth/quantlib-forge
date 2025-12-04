@@ -13,14 +13,14 @@ Running Test 1: Simple (10 RF)...
 +------------------------+------------------+------------------+
 | Method                 |      Bump (AReal)|           XAD-AAD|
 +------------------------+------------------+------------------+
-| Total Time (ms)        |              1.55|              0.23|
+| Avg Time/Iter (ms)     |              0.32|              0.05|
 | Tape Recording (ms)    |                 -|              0.04|
 | Adjoint Comp (ms)      |                 -|              0.00|
 | # Scenarios            |                 1|                 1|
 | # Evaluations          |                11|                 1|
-| Time/Scenario (us)     |            308.80|             39.60|
+| Time/Scenario (us)     |            320.20|             38.20|
 +------------------------+------------------+------------------+
-| Speedup                |             1.00x|             6.70x|
+| Speedup                |             1.00x|             6.39x|
 | Evals/Scenario         |                11|                 1|
 | Expected AAD Benefit   |                 -|               11x|
 +------------------------+------------------+------------------+
@@ -49,14 +49,14 @@ Running Test 2: Full RF (100 RF)...
 +------------------------+------------------+------------------+
 | Method                 |      Bump (AReal)|           XAD-AAD|
 +------------------------+------------------+------------------+
-| Total Time (ms)        |             16.26|              0.25|
+| Avg Time/Iter (ms)     |              3.32|              0.06|
 | Tape Recording (ms)    |                 -|              0.04|
 | Adjoint Comp (ms)      |                 -|              0.00|
 | # Scenarios            |                 1|                 1|
 | # Evaluations          |               101|                 1|
-| Time/Scenario (us)     |           3250.40|             42.80|
+| Time/Scenario (us)     |           3321.80|             44.80|
 +------------------------+------------------+------------------+
-| Speedup                |             1.00x|            65.29x|
+| Speedup                |             1.00x|            57.09x|
 | Evals/Scenario         |               101|                 1|
 | Expected AAD Benefit   |                 -|              101x|
 +------------------------+------------------+------------------+
@@ -85,14 +85,14 @@ Running Test 3: Time Steps (3 steps)...
 +------------------------+------------------+------------------+
 | Method                 |      Bump (AReal)|           XAD-AAD|
 +------------------------+------------------+------------------+
-| Total Time (ms)        |             37.54|              0.63|
-| Tape Recording (ms)    |                 -|              0.10|
+| Avg Time/Iter (ms)     |              7.66|              0.10|
+| Tape Recording (ms)    |                 -|              0.09|
 | Adjoint Comp (ms)      |                 -|              0.00|
 | # Scenarios            |                 3|                 3|
 | # Evaluations          |               303|                 3|
-| Time/Scenario (us)     |           2502.20|             34.47|
+| Time/Scenario (us)     |           2552.13|             29.93|
 +------------------------+------------------+------------------+
-| Speedup                |             1.00x|            59.87x|
+| Speedup                |             1.00x|            73.34x|
 | Evals/Scenario         |               101|                 1|
 | Expected AAD Benefit   |                 -|              101x|
 +------------------------+------------------+------------------+
@@ -121,14 +121,14 @@ Running Test 4: MC 10 paths...
 +------------------------+------------------+------------------+
 | Method                 |      Bump (AReal)|           XAD-AAD|
 +------------------------+------------------+------------------+
-| Total Time (ms)        |            374.35|              6.50|
-| Tape Recording (ms)    |                 -|              1.03|
-| Adjoint Comp (ms)      |                 -|              0.03|
+| Avg Time/Iter (ms)     |             76.58|              0.99|
+| Tape Recording (ms)    |                 -|              0.92|
+| Adjoint Comp (ms)      |                 -|              0.00|
 | # Scenarios            |                30|                30|
 | # Evaluations          |              3030|                30|
-| Time/Scenario (us)     |           2495.57|             35.25|
+| Time/Scenario (us)     |           2552.60|             30.65|
 +------------------------+------------------+------------------+
-| Speedup                |             1.00x|            57.62x|
+| Speedup                |             1.00x|            77.60x|
 | Evals/Scenario         |               101|                 1|
 | Expected AAD Benefit   |                 -|              101x|
 +------------------------+------------------+------------------+
@@ -157,14 +157,14 @@ Running Test 5: MC 100 paths...
 +------------------------+------------------+------------------+
 | Method                 |      Bump (AReal)|           XAD-AAD|
 +------------------------+------------------+------------------+
-| Total Time (ms)        |           3706.01|             65.04|
-| Tape Recording (ms)    |                 -|             10.52|
-| Adjoint Comp (ms)      |                 -|              0.33|
+| Avg Time/Iter (ms)     |            504.54|              9.28|
+| Tape Recording (ms)    |                 -|              8.71|
+| Adjoint Comp (ms)      |                 -|              0.01|
 | # Scenarios            |               300|               300|
 | # Evaluations          |             30300|               300|
-| Time/Scenario (us)     |           2470.64|             36.14|
+| Time/Scenario (us)     |           1681.77|             29.07|
 +------------------------+------------------+------------------+
-| Speedup                |             1.00x|            56.98x|
+| Speedup                |             1.00x|            54.35x|
 | Evals/Scenario         |               101|                 1|
 | Expected AAD Benefit   |                 -|              101x|
 +------------------------+------------------+------------------+
@@ -193,14 +193,14 @@ Running Test 6: Full Scale (1000 paths)...
 +------------------------+------------------+------------------+
 | Method                 |      Bump (AReal)|           XAD-AAD|
 +------------------------+------------------+------------------+
-| Total Time (ms)        |          37471.86|            649.70|
-| Tape Recording (ms)    |                 -|            104.71|
-| Adjoint Comp (ms)      |                 -|              3.42|
+| Avg Time/Iter (ms)     |           7281.07|             89.43|
+| Tape Recording (ms)    |                 -|             83.87|
+| Adjoint Comp (ms)      |                 -|              0.07|
 | # Scenarios            |              3000|              3000|
 | # Evaluations          |            303000|              3000|
-| Time/Scenario (us)     |           2498.09|             36.04|
+| Time/Scenario (us)     |           2427.00|             27.98|
 +------------------------+------------------+------------------+
-| Speedup                |             1.00x|            57.68x|
+| Speedup                |             1.00x|            81.42x|
 | Evals/Scenario         |               101|                 1|
 | Expected AAD Benefit   |                 -|              101x|
 +------------------------+------------------+------------------+
@@ -220,3 +220,7 @@ Running Test 6: Full Scale (1000 paths)...
 =============================================================
   XAD benchmark completed successfully.
 =============================================================
+
+=============================================
+  Benchmark Complete
+=============================================
