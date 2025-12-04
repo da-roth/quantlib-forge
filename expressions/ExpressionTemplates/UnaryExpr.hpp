@@ -19,6 +19,9 @@
 #include <expressions/Macros.hpp>
 #include <expressions/Traits.hpp>
 
+#include <iostream>
+#include <typeinfo>
+
 // ========== Forge Integration: forward declarations and includes ==========
 #include <types/fdouble.hpp>
 
@@ -242,6 +245,13 @@ struct UnaryExpr : Expression<Scalar, UnaryExpr<Scalar, Op, Expr, DerivativeType
     template <class OpT>
     static FEXPR_INLINE ::forge::fdouble performForgeOp(const OpT&, const ::forge::fdouble& a)
     {
+        // DEBUG: Log when unhandled unary operators hit the fallback path
+        static std::size_t fallbackCount = 0;
+        if (fallbackCount < 5) {
+            ++fallbackCount;
+            std::cerr << "[Forge][DEBUG] UnaryExpr fallback hit for unhandled operator type: "
+                      << typeid(OpT).name() << " (occurrence " << fallbackCount << ")\n";
+        }
         // Convert to plain double and back into a forge::fdouble node.
         return ::forge::fdouble(static_cast<double>(a));
     }

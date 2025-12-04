@@ -409,9 +409,9 @@ struct AReal
         // Forge integration: keep Forge passive side in sync and warn if we're
         // overwriting an active Forge value during recording (dropping out of
         // the Forge graph).
-        /*if (forge_value_.isRecording() && forge_value_.isActive()) {
+        if (forge_value_.isRecording() && forge_value_.isActive()) {
             static std::size_t warnCount = 0;
-            if (warnCount < 100) {
+            if (warnCount < 10) {
                 ++warnCount;
                 std::cerr
                     << "[Forge][Warning] AReal::operator=(Scalar) called while Forge "
@@ -419,7 +419,7 @@ struct AReal
                     << "active Forge node with a passive constant (occurrence "
                     << warnCount << ")\n";
             }
-        }*/
+        }
         // Reset Forge-side representation to a passive constant matching the
         // scalar value. This keeps forward values consistent even if the graph
         // dependency has been lost.
@@ -437,9 +437,9 @@ struct AReal
         // If this value was active during recording, using += drops the
         // dependency on inputs from the Forge graph. Warn so users can
         // refactor (e.g. use an expression-based update instead).
-        /*if (forge_value_.isRecording() && forge_value_.isActive()) {
+        if (forge_value_.isRecording() && forge_value_.isActive()) {
             static std::size_t warnCount = 0;
-            if (warnCount < 100) {
+            if (warnCount < 10) {
                 ++warnCount;
                 std::cerr
                     << "[Forge][Warning] AReal::operator+=(Scalar) called while Forge "
@@ -447,7 +447,7 @@ struct AReal
                     << "in-place scalar update and drops you out of the Forge graph "
                     << "(occurrence " << warnCount << ")\n";
             }
-        }*/
+        }
 
         // Ensure Forge's passive value matches the new scalar, even if the
         // active node (if any) is no longer meaningful.
@@ -459,10 +459,9 @@ struct AReal
     FEXPR_INLINE AReal& operator-=(Scalar rhs)
     {
         base_type::operator-=(rhs);
-        /*
         if (forge_value_.isRecording() && forge_value_.isActive()) {
             static std::size_t warnCount = 0;
-            if (warnCount < 100) {
+            if (warnCount < 10) {
                 ++warnCount;
                 std::cerr
                     << "[Forge][Warning] AReal::operator-=(Scalar) called while Forge "
@@ -471,7 +470,6 @@ struct AReal
                     << "(occurrence " << warnCount << ")\n";
             }
         }
-        */
 
         forge_value_ = ::forge::fdouble(static_cast<double>(this->a_));
         return *this;
@@ -484,10 +482,9 @@ struct AReal
     // not throw) to help locate missing Forge wiring without breaking code.
     FEXPR_INLINE const Scalar& value() const
     {
-        /*
         if (forge_value_.isRecording() && forge_value_.isActive()) {
             static std::size_t warnCount = 0;
-            if (warnCount < 100) {
+            if (warnCount < 10) {
                 ++warnCount;
                 std::cerr
                     << "[Forge][Warning] AReal::value() called while Forge recording "
@@ -495,16 +492,14 @@ struct AReal
                     << "Forge graph (occurrence " << warnCount << ")\n";
             }
         }
-        */
         return this->a_;
     }
 
     FEXPR_INLINE Scalar& value()
     {
-        /*
         if (forge_value_.isRecording() && forge_value_.isActive()) {
             static std::size_t warnCount = 0;
-            if (warnCount < 100) {
+            if (warnCount < 10) {
                 ++warnCount;
                 std::cerr
                     << "[Forge][Warning] AReal::value() called while Forge recording "
@@ -512,7 +507,6 @@ struct AReal
                     << "Forge graph (occurrence " << warnCount << ")\n";
             }
         }
-        */
         return this->a_;
     }
 
@@ -528,8 +522,13 @@ struct AReal
     FEXPR_INLINE derivative_type getAdjoint() const { return getDerivative(); }
 
     // ========== Forge Integration: Helper methods ==========
-    /// Mark this variable as a differentiable input for Forge
+    /// Mark this variable as an input for Forge (re-evaluation only, no gradients)
     FEXPR_INLINE void markForgeInput() {
+        forge_value_.markInput();
+    }
+
+    /// Mark this variable as a differentiable input for Forge (enables AAD gradients)
+    FEXPR_INLINE void markForgeInputAndDiff() {
         forge_value_.markInputAndDiff();
     }
 

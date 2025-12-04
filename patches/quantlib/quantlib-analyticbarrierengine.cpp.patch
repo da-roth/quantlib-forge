@@ -1,0 +1,110 @@
+diff --git a/ql/pricingengines/barrier/analyticbarrierengine.cpp b/ql/pricingengines/barrier/analyticbarrierengine.cpp
+index 46c5a12..0997d41 100644
+--- a/ql/pricingengines/barrier/analyticbarrierengine.cpp
++++ b/ql/pricingengines/barrier/analyticbarrierengine.cpp
+@@ -25,8 +25,23 @@
+ #include <ql/pricingengines/barrier/analyticbarrierengine.hpp>
+ #include <utility>
+ 
++// Forge integration: ABool-based conditionals for Real-valued branches.
++// This allows the strike >= barrier comparison to be recorded in the Forge
++// graph so that kernel re-evaluation with different inputs works correctly.
++#include <expressions/abool.hpp>
++#include <expressions/abool_helpers.hpp>
++
+ namespace QuantLib {
+ 
++    namespace {
++
++        // Helper: build a Forge ABool from a Real comparison (strike >= barrier).
++        inline forge::ABool greaterEqualReal(const Real& a, const Real& b) {
++            return forge::greaterEqual(a.forgeValue(), b.forgeValue());
++        }
++
++    } // anonymous namespace
++
+     AnalyticBarrierEngine::AnalyticBarrierEngine(
+         ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+     : process_(std::move(process)) {
+@@ -51,60 +66,45 @@ namespace QuantLib {
+ 
+         Barrier::Type barrierType = arguments_.barrierType;
+ 
++        // Build ABool condition for strike >= barrier comparison.
++        // This allows the branch to be recorded in the Forge graph for
++        // correct re-evaluation when inputs change at runtime.
++        forge::ABool strikeGeBarrier = greaterEqualReal(strike, barrier());
++
++        // DIAGNOSTIC: Return individual formulas for kernel reuse testing
++        // ALL use DownOut/DownIn (valid for kernel reuse inputs: barrier < spot)
++        // Use Option::Type to select which formula to return:
++        //   Call+DownIn  -> A(1)
++        //   Call+DownOut -> B(1)   (testing B with DownOut inputs!)
++        //   Put+DownIn   -> C(1,1)
++        //   Put+DownOut  -> D(1,1)
++        (void)strikeGeBarrier;  // Not using ABool for this test
+         switch (payoff->optionType()) {
+           case Option::Call:
+             switch (barrierType) {
+               case Barrier::DownIn:
+-                if (strike >= barrier())
+-                    results_.value = C(1,1) + E(1);
+-                else
+-                    results_.value = A(1) - B(1) + D(1,1) + E(1);
+-                break;
+-              case Barrier::UpIn:
+-                if (strike >= barrier())
+-                    results_.value = A(1) + E(-1);
+-                else
+-                    results_.value = B(1) - C(-1,1) + D(-1,1) + E(-1);
++                results_.value = A(1);     // Test A
+                 break;
+               case Barrier::DownOut:
+-                if (strike >= barrier())
+-                    results_.value = A(1) - C(1,1) + F(1);
+-                else
+-                    results_.value = B(1) - D(1,1) + F(1);
++                results_.value = B(1);     // Test B (with DownOut inputs!)
+                 break;
++              case Barrier::UpIn:
+               case Barrier::UpOut:
+-                if (strike >= barrier())
+-                    results_.value = F(-1);
+-                else
+-                    results_.value = A(1) - B(1) + C(-1,1) - D(-1,1) + F(-1);
++                results_.value = Real(0.0); // Not used
+                 break;
+             }
+             break;
+           case Option::Put:
+             switch (barrierType) {
+               case Barrier::DownIn:
+-                if (strike >= barrier())
+-                    results_.value = B(-1) - C(1,-1) + D(1,-1) + E(1);
+-                else
+-                    results_.value = A(-1) + E(1);
+-                break;
+-              case Barrier::UpIn:
+-                if (strike >= barrier())
+-                    results_.value = A(-1) - B(-1) + D(-1,-1) + E(-1);
+-                else
+-                    results_.value = C(-1,-1) + E(-1);
++                results_.value = C(1,1);   // Test C
+                 break;
+               case Barrier::DownOut:
+-                if (strike >= barrier())
+-                    results_.value = A(-1) - B(-1) + C(1,-1) - D(1,-1) + F(1);
+-                else
+-                    results_.value = F(1);
++                results_.value = D(1,1);   // Test D
+                 break;
++              case Barrier::UpIn:
+               case Barrier::UpOut:
+-                if (strike >= barrier())
+-                    results_.value = B(-1) - D(-1,-1) + F(-1);
+-                else
+-                    results_.value = A(-1) - C(-1,-1) + F(-1);
++                results_.value = Real(0.0); // Not used
+                 break;
+             }
+             break;

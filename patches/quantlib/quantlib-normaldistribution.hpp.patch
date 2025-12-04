@@ -1,0 +1,39 @@
+diff --git a/ql/math/distributions/normaldistribution.hpp b/ql/math/distributions/normaldistribution.hpp
+index 90255f6..b83a217 100644
+--- a/ql/math/distributions/normaldistribution.hpp
++++ b/ql/math/distributions/normaldistribution.hpp
+@@ -4,6 +4,7 @@
+  Copyright (C) 2002, 2003 Ferdinando Ametrano
+  Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+  Copyright (C) 2010 Kakhkhor Abdijalilov
++ Copyright (C) 2025 QuantLib-Forge Authors (Forge-aware modifications)
+ 
+  This file is part of QuantLib, a free-software/open-source library
+  for financial quantitative analysts and developers - http://quantlib.org/
+@@ -21,6 +22,9 @@
+ 
+ /*! \file normaldistribution.hpp
+     \brief normal, cumulative and inverse cumulative distributions
++
++    Forge-aware version: CumulativeNormalDistribution uses ABool::If
++    for all conditional branches to enable kernel reuse.
+ */
+ 
+ #ifndef quantlib_normal_distribution_hpp
+@@ -56,10 +60,13 @@ namespace QuantLib {
+     typedef NormalDistribution GaussianDistribution;
+ 
+ 
+-    //! Cumulative normal distribution function
++    //! Cumulative normal distribution function - Forge-aware version
+     /*! Given x it provides an approximation to the
+-        integral of the gaussian normal distribution:
+-        formula here ...
++        integral of the gaussian normal distribution.
++
++        This version uses the Forge-aware ErrorFunction with ABool::If
++        for all conditional branches, enabling kernel reuse when inputs
++        change and different branches become active.
+ 
+         For this implementation see M. Abramowitz and I. Stegun,
+         Handbook of Mathematical Functions,

@@ -1,0 +1,91 @@
+##############################################################################
+#
+#  Minimal CDF Kernel Reuse Test
+#
+#  Fast workflow to test CDF kernel reuse without building QuantLib.
+#  Compares original (C++ if/else) vs Forge-aware (ABool::If) implementations.
+#
+#  This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
+#
+#  Copyright (C) 2025 The QuantLib-Forge Authors
+#
+#  SPDX-License-Identifier: AGPL-3.0-or-later
+#
+##############################################################################
+
+name: Minimal CDF Test
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  test-cdf-linux:
+    runs-on: ubuntu-latest
+    container: ghcr.io/lballabio/quantlib-devenv:rolling
+
+    steps:
+      - name: Checkout quantlib-forge
+        uses: actions/checkout@v4
+        with:
+          path: quantlib-forge
+
+      - name: Checkout Forge
+        uses: actions/checkout@v4
+        with:
+          repository: da-roth/forge
+          path: forge
+
+      - name: Setup
+        run: |
+          apt-get update && apt-get install -y ninja-build
+
+      - name: Build Forge
+        run: |
+          cd forge
+          cmake -B build -S tools/packaging \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-forge"
+          cmake --build build --config Release
+          cmake --install build --config Release
+
+      - name: Build and Run Minimal CDF Test
+        run: |
+          mkdir -p test-build
+          cd test-build
+
+          cat > CMakeLists.txt << 'EOF'
+          cmake_minimum_required(VERSION 3.15)
+          project(MinimalCDFTest LANGUAGES CXX)
+
+          set(CMAKE_CXX_STANDARD 17)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+          # Find Forge package
+          find_package(Forge CONFIG REQUIRED)
+
+          # Add the expressions library from quantlib-forge
+          add_subdirectory($ENV{GITHUB_WORKSPACE}/quantlib-forge/expressions expressions)
+
+          add_executable(minimal_cdf_test
+            $ENV{GITHUB_WORKSPACE}/quantlib-forge/tests/minimal_cdf_test.cpp
+          )
+
+          target_include_directories(minimal_cdf_test PRIVATE
+            $ENV{GITHUB_WORKSPACE}/quantlib-forge/tests
+          )
+
+          target_link_libraries(minimal_cdf_test PRIVATE forge-expressions)
+          EOF
+
+          cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-forge" \
+            .
+
+          cmake --build .
+
+          echo "============================================================="
+          echo "  Running Minimal CDF Kernel Reuse Test"
+          echo "============================================================="
+          ./minimal_cdf_test

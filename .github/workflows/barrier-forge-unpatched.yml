@@ -1,0 +1,125 @@
+##############################################################################
+#
+#  Barrier Forge Test - Unpatched (Expected to FAIL)
+#
+#  This workflow demonstrates the kernel reuse problem WITHOUT Forge-aware
+#  patches. When inputs change and different code branches become active,
+#  the pre-compiled kernel produces incorrect results.
+#
+#  Expected behavior: Input Set 5 (strike < barrier) should FAIL with ~144% error
+#
+#  Copyright (C) 2025 The QuantLib-Forge Authors
+#
+#  SPDX-License-Identifier: AGPL-3.0-or-later
+#
+##############################################################################
+
+name: Barrier Forge (Unpatched - Expected FAIL)
+
+on:
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  test-unpatched:
+    runs-on: ubuntu-latest
+    container: ghcr.io/lballabio/quantlib-devenv:rolling
+
+    steps:
+      - name: Checkout quantlib-forge
+        uses: actions/checkout@v4
+        with:
+          path: quantlib-forge
+
+      - name: Checkout Forge
+        uses: actions/checkout@v4
+        with:
+          repository: da-roth/forge
+          path: forge
+
+      - name: Checkout QuantLib
+        uses: actions/checkout@v4
+        with:
+          repository: lballabio/QuantLib
+          path: quantlib
+          fetch-depth: 0
+
+      - name: Pin QuantLib to pre-multicurve commit
+        run: |
+          cd quantlib
+          git checkout b3612ef
+
+      - name: Setup
+        run: |
+          apt-get update && apt-get install -y ninja-build
+
+      - name: Build Forge
+        run: |
+          cd forge
+          cmake -B build -S tools/packaging \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install-release"
+          cmake --build build --config Release
+          cmake --install build --config Release
+
+      - name: Apply QuantLib ABool patch (base types only, NO Forge-aware functions)
+        run: |
+          cd quantlib
+          git apply ../quantlib-forge/patches/quantlib/quantlib-abool.patch
+          echo ""
+          echo "NOTE: Only applying base ABool types patch."
+          echo "NOT applying Forge-aware ErrorFunction/CDF/BarrierEngine patches."
+          echo "This means conditional branches use C++ if/else, not ABool::If."
+          echo ""
+
+      - name: Switch test file to ABool version
+        run: |
+          sed -i 's/barrieroption_forge\.cpp/barrieroption_forge_abool.cpp/' quantlib-forge/forge-test-suite/CMakeLists.txt
+
+      - name: Build QuantLib (Unpatched)
+        run: |
+          cd quantlib
+          cmake -B build -S . \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-release" \
+            -DCMAKE_CXX_FLAGS="-Wno-reorder" \
+            -DQL_BUILD_TEST_SUITE=OFF \
+            -DQL_BUILD_EXAMPLES=OFF \
+            -DQL_BUILD_BENCHMARK=OFF \
+            -DQL_ENABLE_SESSIONS=OFF \
+            -DQL_NULL_AS_FUNCTIONS=ON \
+            -DQL_FORGE_DISABLE_AAD=OFF \
+            -DQL_FORGE_BUILD_TEST_SUITE=OFF \
+            -DQL_FORGE_BUILD_TEST_SUITE=ON \
+            -DQL_EXTERNAL_SUBDIRECTORIES="../quantlib-forge" \
+            -DQL_EXTRA_LINK_LIBRARIES="QuantLib-Forge"
+          cmake --build build --config Release
+
+      - name: Run Barrier Forge Test (Expected to FAIL)
+        run: |
+          cd quantlib/build
+          TEST_EXE=$(find . -name "forge-test-suite" -type f -executable | head -1)
+
+          echo "============================================================="
+          echo "  BARRIER FORGE TEST - UNPATCHED"
+          echo "============================================================="
+          echo ""
+          echo "This test demonstrates the kernel reuse problem:"
+          echo "  - Kernel is compiled with Input Set 1 (strike=100 > barrier)"
+          echo "  - Re-evaluated with Input Set 5 (strike=80 < barrier=95)"
+          echo "  - Without Forge-aware patches, branch conditions are baked in"
+          echo "  - Expected: Input Set 5 FAILS with large error (~144%)"
+          echo ""
+          echo "============================================================="
+          echo ""
+
+          # Run the test - we expect it to fail on Input Set 5
+          # Use || true to not fail the workflow, we want to show the output
+          $TEST_EXE --log_level=message --run_test=QuantLibForgeRisksTests/BarrierOptionForgeTest/testForgeBarrierKernelReuse 2>&1 || true
+
+          echo ""
+          echo "============================================================="
+          echo "  EXPECTED RESULT: Input Set 5 should FAIL"
+          echo "  This demonstrates why Forge-aware patches are needed."
+          echo "============================================================="

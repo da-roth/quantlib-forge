@@ -623,11 +623,13 @@ namespace {
 
         std::cout << std::fixed << std::setprecision(2);
 
-        std::cout << "|" << std::setw(col1) << std::left << " Total Time (ms)"
-                  << "|" << std::setw(col2) << std::right << timing.totalTimeMs << "|\n";
-
+        // Report average runtime per timed iteration first (more comparable across setups)
         std::cout << "|" << std::setw(col1) << std::left << " Avg Time/Iteration (ms)"
                   << "|" << std::setw(col2) << std::right << timing.avgTimePerIterationMs << "|\n";
+
+        // Total wall-clock time for all timed iterations (kept for reference)
+        std::cout << "|" << std::setw(col1) << std::left << " Total Time (ms)"
+                  << "|" << std::setw(col2) << std::right << timing.totalTimeMs << "|\n";
 
         std::cout << "|" << std::setw(col1) << std::left << " # Scenarios"
                   << "|" << std::setw(col2) << std::right << timing.numScenarios << "|\n";

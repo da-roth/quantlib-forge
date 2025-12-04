@@ -32,6 +32,12 @@ jobs:
         with:
           repository: lballabio/QuantLib
           path: QuantLib
+          fetch-depth: 0
+
+      - name: Pin QuantLib to pre-multicurve commit
+        run: |
+          cd QuantLib
+          git checkout b3612ef
 
       - name: Setup
         run: |

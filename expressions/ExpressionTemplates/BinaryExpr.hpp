@@ -21,6 +21,9 @@
 #include <expressions/Macros.hpp>
 #include <expressions/Traits.hpp>
 
+#include <iostream>
+#include <typeinfo>
+
 // ========== Forge Integration: Add includes ==========
 #include <types/fdouble.hpp>
 // =====================================================
@@ -153,6 +156,13 @@ struct BinaryExpr
                                                     const ::forge::fdouble& a,
                                                     const ::forge::fdouble& b)
     {
+        // DEBUG: Log when unhandled binary operators hit the fallback path
+        static std::size_t fallbackCount = 0;
+        if (fallbackCount < 20) {
+            ++fallbackCount;
+            std::cerr << "[Forge][DEBUG] BinaryExpr fallback hit for unhandled operator type: "
+                      << typeid(OpT).name() << " (occurrence " << fallbackCount << ")\n";
+        }
         const double va = static_cast<double>(a);
         const double vb = static_cast<double>(b);
         const double r = op(va, vb);

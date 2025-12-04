@@ -1,6 +1,6 @@
 /*******************************************************************************
 
-   XVA Performance Benchmark - XAD Version (Standalone)
+   XVA Performance Benchmark - Forge Forward-Only Version (Standalone)
 
    This file is part of QuantLib-Forge, a Forge integration layer for QuantLib.
 
@@ -27,11 +27,18 @@
 ******************************************************************************/
 
 // =============================================================================
-// XVA PERFORMANCE TEST - XAD VERSION (Standalone Executable)
+// XVA PERFORMANCE TEST - FORGE FORWARD-ONLY VERSION (Standalone Executable)
 // =============================================================================
-// This test compares TWO approaches:
-//   1. Bump-Reval (AReal)  - QuantLib evaluation with finite differences (using AReal)
-//   2. XAD AAD             - Tape-based AAD, single forward+backward pass per scenario
+// This test compares multiple approaches using bump-reval for sensitivities:
+//   1. Bump-Reval (baseline)    - Direct QuantLib evaluation with finite differences
+//   2. Forge Forward SSE2 (Stability) - JIT-compiled kernel, stability-only optimizations
+//   3. Forge Forward SSE2 (All Opt)   - JIT-compiled kernel, all optimizations enabled
+//   4. Forge Forward AVX2 (Stability) - JIT-compiled kernel, AVX2, stability-only (if supported)
+//   5. Forge Forward AVX2 (All Opt)   - JIT-compiled kernel, AVX2, all optimizations (if supported)
+//
+// All compute sensitivities via finite differences (bumping).
+// The key difference is Forge Forward uses markForgeInput() instead of
+// markForgeInputAndDiff(), which should skip AAD/gradient buffer allocation.
 //
 // Test Cases:
 //   1. 1 swap, 1 step, 1 path, 10 risk factors (EUR curve only)
@@ -40,8 +47,6 @@
 //   4. 1 swap, 3 steps, 10 paths, 100 risk factors
 //   5. 1 swap, 3 steps, 100 paths, 100 risk factors
 //   6. 1 swap, 3 steps, 1000 paths, 100 risk factors
-//
-// NOTE: This is a standalone executable. Compile against QuantLib built with XAD.
 // =============================================================================
 
 #include <ql/qldefines.hpp>
@@ -58,6 +63,13 @@
 #include <ql/time/calendars/target.hpp>
 #include <ql/time/daycounters/actual365fixed.hpp>
 #include <ql/settings.hpp>
+
+// Forge integration headers
+#include <graph/graph_recorder.hpp>
+#include <compiler/forge_engine.hpp>
+#include <compiler/compiler_config.hpp>
+#include <compiler/node_value_buffers/node_value_buffer.hpp>
+
 #include <chrono>
 #include <iomanip>
 #include <iostream>
@@ -66,9 +78,73 @@
 #include <algorithm>
 #include <cmath>
 
+// Check for AVX2 support at runtime
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
+#include <cpuid.h>
+#endif
+#endif
+
 using namespace QuantLib;
 
 namespace {
+
+    //=========================================================================
+    // Check if AVX2 is supported on this CPU
+    //=========================================================================
+    bool isAVX2Supported() {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#ifdef _MSC_VER
+        int cpuInfo[4];
+        __cpuid(cpuInfo, 0);
+        int nIds = cpuInfo[0];
+        if (nIds >= 7) {
+            __cpuidex(cpuInfo, 7, 0);
+            return (cpuInfo[1] & (1 << 5)) != 0; // AVX2 bit
+        }
+        return false;
+#else
+        unsigned int eax, ebx, ecx, edx;
+        if (__get_cpuid_max(0, nullptr) >= 7) {
+            __cpuid_count(7, 0, eax, ebx, ecx, edx);
+            return (ebx & (1 << 5)) != 0; // AVX2 bit
+        }
+        return false;
+#endif
+#else
+        return false; // Non-x86 architecture
+#endif
+    }
+
+    //=========================================================================
+    // Optimization Mode for Forge compiler
+    //=========================================================================
+    enum class OptimizationMode {
+        Default,        // All optimizations ON
+        StabilityOnly   // Stability cleaning only (uses CompilerConfig::Default())
+    };
+
+    // Helper to configure CompilerConfig based on optimization mode
+    forge::CompilerConfig configureOptimizations(OptimizationMode mode) {
+        forge::CompilerConfig config;
+        switch (mode) {
+            case OptimizationMode::Default:
+                // Explicitly enable all optimizations
+                config.enableOptimizations = true;
+                config.enableCSE = true;
+                config.enableAlgebraicSimplification = true;
+                config.enableInactiveFolding = true;
+                config.enableStabilityCleaning = true;
+                break;
+            case OptimizationMode::StabilityOnly:
+                // Use default (which is now stability-only)
+                config = forge::CompilerConfig::Default();
+                break;
+        }
+        return config;
+    }
 
     //=========================================================================
     // IR Curve Pillar Definition
@@ -182,12 +258,12 @@ namespace {
     struct TimingResults {
         double totalTimeMs = 0.0;
         double avgTimePerIterationMs = 0.0;
-        double tapeTimeMs = 0.0;
-        double adjointTimeMs = 0.0;
+        double kernelCreationTimeMs = 0.0;
         double evaluationTimeMs = 0.0;
         double singleScenarioTimeUs = 0.0;
         Size numScenarios = 0;
         Size numEvaluations = 0;
+        Size numKernelsCreated = 0;
     };
 
     //=========================================================================
@@ -462,7 +538,7 @@ namespace {
     }
 
     //=========================================================================
-    // Bump-Reval computation (uses AReal but no tape)
+    // 1. BUMP-REVAL COMPUTATION (Baseline)
     //=========================================================================
     XvaResults computeBumpReval(
         const XvaConfig& config,
@@ -506,11 +582,10 @@ namespace {
 
                     results.sensitivities[s][t][p].resize(config.numRiskFactors);
                     for (Size i = 0; i < config.numRiskFactors; ++i) {
-                        std::vector<double> bumpedInputs = flatInputs;
+                        std::vector<Real> bumpedInputs = realInputs;
                         bumpedInputs[i] += config.bumpSize;
-                        std::vector<Real> bumpedRealInputs(bumpedInputs.begin(), bumpedInputs.end());
                         double bumpedNpv = value(priceSwap(
-                            swaps[s], t, config.numTimeSteps, bumpedRealInputs, pillars, today, calendar, dayCounter, config.numRiskFactors));
+                            swaps[s], t, config.numTimeSteps, bumpedInputs, pillars, today, calendar, dayCounter, config.numRiskFactors));
                         totalEvaluations++;
                         results.sensitivities[s][t][p][i] = (bumpedNpv - baseNpv) / config.bumpSize;
                     }
@@ -526,6 +601,8 @@ namespace {
         timing.numEvaluations = totalEvaluations;
         timing.evaluationTimeMs = duration.count() / 1000.0;
         timing.singleScenarioTimeUs = numScenarios > 0 ? double(duration.count()) / numScenarios : 0.0;
+        timing.numKernelsCreated = 0;
+        timing.kernelCreationTimeMs = 0.0;
 
         Size totalScenarios = config.numSwaps * config.numTimeSteps * config.numPaths;
         results.expectedExposure = totalScenarios > 0 ? totalExposure / totalScenarios : 0.0;
@@ -535,9 +612,9 @@ namespace {
     }
 
     //=========================================================================
-    // XAD AAD computation (tape-based)
+    // 2. FORGE FORWARD BUMP-REVAL (JIT, no AAD - uses markForgeInput)
     //=========================================================================
-    XvaResults computeXadAad(
+    XvaResults computeForgeForwardBumpRevalImpl(
         const XvaConfig& config,
         const std::vector<SwapDefinition>& swaps,
         const std::vector<std::vector<MarketScenario>>& scenarios,
@@ -545,18 +622,20 @@ namespace {
         const Date& today,
         const Calendar& calendar,
         const DayCounter& dayCounter,
-        TimingResults& timing) {
+        TimingResults& timing,
+        OptimizationMode optMode = OptimizationMode::Default,
+        forge::CompilerConfig::InstructionSet instructionSet = forge::CompilerConfig::InstructionSet::SSE2_SCALAR) {
 
         XvaResults results;
         results.exposures.resize(config.numSwaps);
         results.sensitivities.resize(config.numSwaps);
 
         double totalExposure = 0.0;
+        Size numKernels = 0;
+        Size numEvaluations = 0;
         Size numScenarios = 0;
-        double totalTapeUs = 0.0;
-        double totalAdjointUs = 0.0;
-
-        using tape_type = Real::tape_type;
+        double totalKernelCreationUs = 0.0;
+        double totalEvalUs = 0.0;
 
         for (Size s = 0; s < config.numSwaps; ++s) {
             results.exposures[s].resize(config.numTimeSteps);
@@ -566,68 +645,143 @@ namespace {
                 results.exposures[s][t].resize(config.numPaths);
                 results.sensitivities[s][t].resize(config.numPaths);
 
+                // --- KERNEL CREATION ---
+                auto kernelStartTime = std::chrono::high_resolution_clock::now();
+
+                forge::GraphRecorder recorder;
+                recorder.start();
+
+                std::vector<double> flatInputs = scenarios[t][0].flatten();
+                std::vector<Real> rateInputs(config.numRiskFactors);
+                std::vector<forge::NodeId> rateNodeIds(config.numRiskFactors);
+                for (Size i = 0; i < config.numRiskFactors; ++i) {
+                    rateInputs[i] = flatInputs[i];
+                    rateInputs[i].markForgeInput();  // Forward-only, no AAD gradients
+                    rateNodeIds[i] = rateInputs[i].forgeNodeId();
+                }
+
+                Real npv = priceSwap(swaps[s], t, config.numTimeSteps, rateInputs, pillars, today, calendar, dayCounter, config.numRiskFactors);
+                npv.markForgeOutput();
+                forge::NodeId npvNodeId = npv.forgeNodeId();
+
+                recorder.stop();
+                forge::Graph graph = recorder.graph();
+
+                // Configure compiler based on optimization mode and instruction set
+                forge::CompilerConfig compilerConfig = configureOptimizations(optMode);
+                compilerConfig.instructionSet = instructionSet;
+                forge::ForgeEngine compiler(compilerConfig);
+                auto kernel = compiler.compile(graph);
+                auto buffer = forge::NodeValueBufferFactory::create(graph, *kernel);
+
+                auto kernelEndTime = std::chrono::high_resolution_clock::now();
+                totalKernelCreationUs += std::chrono::duration_cast<std::chrono::microseconds>(kernelEndTime - kernelStartTime).count();
+                numKernels++;
+
+                // --- EVALUATION ---
+                auto evalStartTime = std::chrono::high_resolution_clock::now();
+
                 for (Size p = 0; p < config.numPaths; ++p) {
                     const auto& scenario = scenarios[t][p];
-                    std::vector<double> flatInputsDouble = scenario.flatten();
-
-                    auto tapeStart = std::chrono::high_resolution_clock::now();
-
-                    tape_type tape;
-
-                    std::vector<Real> allInputs(config.numRiskFactors);
-                    for (Size i = 0; i < config.numRiskFactors; ++i) {
-                        allInputs[i] = flatInputsDouble[i];
-                    }
+                    std::vector<double> scenarioInputs = scenario.flatten();
 
                     for (Size i = 0; i < config.numRiskFactors; ++i) {
-                        tape.registerInput(allInputs[i]);
+                        buffer->setValue(rateNodeIds[i], scenarioInputs[i]);
                     }
+                    kernel->execute(*buffer);
+                    numEvaluations++;
 
-                    tape.newRecording();
-
-                    Real npv = priceSwap(
-                        swaps[s], t, config.numTimeSteps, allInputs, pillars,
-                        today, calendar, dayCounter, config.numRiskFactors);
-
-                    tape.registerOutput(npv);
-
-                    auto tapeEnd = std::chrono::high_resolution_clock::now();
-                    totalTapeUs += std::chrono::duration_cast<std::chrono::microseconds>(tapeEnd - tapeStart).count();
-
-                    auto adjointStart = std::chrono::high_resolution_clock::now();
-
-                    derivative(npv) = 1.0;
-                    tape.computeAdjoints();
-
-                    auto adjointEnd = std::chrono::high_resolution_clock::now();
-                    totalAdjointUs += std::chrono::duration_cast<std::chrono::microseconds>(adjointEnd - adjointStart).count();
-
-                    double npvValue = value(npv);
-                    results.exposures[s][t][p] = std::max(0.0, npvValue);
+                    double baseNpv = buffer->getValue(npvNodeId);
+                    results.exposures[s][t][p] = std::max(0.0, baseNpv);
                     totalExposure += results.exposures[s][t][p];
 
+                    // Compute sensitivities via bump-reval (no AAD)
                     results.sensitivities[s][t][p].resize(config.numRiskFactors);
                     for (Size i = 0; i < config.numRiskFactors; ++i) {
-                        results.sensitivities[s][t][p][i] = derivative(allInputs[i]);
-                    }
+                        buffer->setValue(rateNodeIds[i], scenarioInputs[i] + config.bumpSize);
+                        kernel->execute(*buffer);
+                        numEvaluations++;
 
+                        double bumpedNpv = buffer->getValue(npvNodeId);
+                        results.sensitivities[s][t][p][i] = (bumpedNpv - baseNpv) / config.bumpSize;
+
+                        buffer->setValue(rateNodeIds[i], scenarioInputs[i]);
+                    }
                     numScenarios++;
                 }
+
+                auto evalEndTime = std::chrono::high_resolution_clock::now();
+                totalEvalUs += std::chrono::duration_cast<std::chrono::microseconds>(evalEndTime - evalStartTime).count();
             }
         }
 
+        timing.numKernelsCreated = numKernels;
+        timing.numEvaluations = numEvaluations;
         timing.numScenarios = numScenarios;
-        timing.numEvaluations = numScenarios;
-        timing.tapeTimeMs = totalTapeUs / 1000.0;
-        timing.adjointTimeMs = totalAdjointUs / 1000.0;
-        timing.evaluationTimeMs = (totalTapeUs + totalAdjointUs) / 1000.0;
-        timing.singleScenarioTimeUs = numScenarios > 0 ? (totalTapeUs + totalAdjointUs) / numScenarios : 0.0;
+        timing.kernelCreationTimeMs = totalKernelCreationUs / 1000.0;
+        timing.evaluationTimeMs = totalEvalUs / 1000.0;
+        timing.singleScenarioTimeUs = numScenarios > 0 ? totalEvalUs / numScenarios : 0.0;
 
         Size totalScenarios = config.numSwaps * config.numTimeSteps * config.numPaths;
         results.expectedExposure = totalScenarios > 0 ? totalExposure / totalScenarios : 0.0;
         results.cva = results.expectedExposure * 0.4 * 0.02;
 
         return results;
+    }
+
+    //=========================================================================
+    // Wrapper functions for different variants
+    //=========================================================================
+    XvaResults computeForgeForwardSSE2Stability(
+        const XvaConfig& config,
+        const std::vector<SwapDefinition>& swaps,
+        const std::vector<std::vector<MarketScenario>>& scenarios,
+        const std::vector<IRPillar>& pillars,
+        const Date& today,
+        const Calendar& calendar,
+        const DayCounter& dayCounter,
+        TimingResults& timing) {
+        return computeForgeForwardBumpRevalImpl(config, swaps, scenarios, pillars, today, calendar, dayCounter, timing,
+                                                 OptimizationMode::StabilityOnly, forge::CompilerConfig::InstructionSet::SSE2_SCALAR);
+    }
+
+    XvaResults computeForgeForwardSSE2AllOpt(
+        const XvaConfig& config,
+        const std::vector<SwapDefinition>& swaps,
+        const std::vector<std::vector<MarketScenario>>& scenarios,
+        const std::vector<IRPillar>& pillars,
+        const Date& today,
+        const Calendar& calendar,
+        const DayCounter& dayCounter,
+        TimingResults& timing) {
+        return computeForgeForwardBumpRevalImpl(config, swaps, scenarios, pillars, today, calendar, dayCounter, timing,
+                                                 OptimizationMode::Default, forge::CompilerConfig::InstructionSet::SSE2_SCALAR);
+    }
+
+    XvaResults computeForgeForwardAVX2Stability(
+        const XvaConfig& config,
+        const std::vector<SwapDefinition>& swaps,
+        const std::vector<std::vector<MarketScenario>>& scenarios,
+        const std::vector<IRPillar>& pillars,
+        const Date& today,
+        const Calendar& calendar,
+        const DayCounter& dayCounter,
+        TimingResults& timing) {
+        return computeForgeForwardBumpRevalImpl(config, swaps, scenarios, pillars, today, calendar, dayCounter, timing,
+                                                 OptimizationMode::StabilityOnly, forge::CompilerConfig::InstructionSet::AVX2_PACKED);
+    }
+
+    XvaResults computeForgeForwardAVX2AllOpt(
+        const XvaConfig& config,
+        const std::vector<SwapDefinition>& swaps,
+        const std::vector<std::vector<MarketScenario>>& scenarios,
+        const std::vector<IRPillar>& pillars,
+        const Date& today,
+        const Calendar& calendar,
+        const DayCounter& dayCounter,
+        TimingResults& timing) {
+        return computeForgeForwardBumpRevalImpl(config, swaps, scenarios, pillars, today, calendar, dayCounter, timing,
+                                                 OptimizationMode::Default, forge::CompilerConfig::InstructionSet::AVX2_PACKED);
     }
 
     //=========================================================================
@@ -658,11 +812,11 @@ namespace {
         for (Size r = 0; r < config.timedRuns; ++r) {
             TimingResults iterTiming;
             lastResults = computeFunc(config, swaps, scenarios, pillars, today, calendar, dayCounter, iterTiming);
-            accumulatedTiming.tapeTimeMs += iterTiming.tapeTimeMs;
-            accumulatedTiming.adjointTimeMs += iterTiming.adjointTimeMs;
+            accumulatedTiming.kernelCreationTimeMs += iterTiming.kernelCreationTimeMs;
             accumulatedTiming.evaluationTimeMs += iterTiming.evaluationTimeMs;
-            accumulatedTiming.numScenarios += iterTiming.numScenarios;
+            accumulatedTiming.numKernelsCreated += iterTiming.numKernelsCreated;
             accumulatedTiming.numEvaluations += iterTiming.numEvaluations;
+            accumulatedTiming.numScenarios += iterTiming.numScenarios;
         }
 
         auto endTime = std::chrono::high_resolution_clock::now();
@@ -670,11 +824,11 @@ namespace {
 
         timing.totalTimeMs = duration.count() / 1000.0;
         timing.avgTimePerIterationMs = timing.totalTimeMs / config.timedRuns;
-        timing.tapeTimeMs = accumulatedTiming.tapeTimeMs / config.timedRuns;
-        timing.adjointTimeMs = accumulatedTiming.adjointTimeMs / config.timedRuns;
+        timing.kernelCreationTimeMs = accumulatedTiming.kernelCreationTimeMs / config.timedRuns;
         timing.evaluationTimeMs = accumulatedTiming.evaluationTimeMs / config.timedRuns;
-        timing.numScenarios = accumulatedTiming.numScenarios / config.timedRuns;
+        timing.numKernelsCreated = accumulatedTiming.numKernelsCreated / config.timedRuns;
         timing.numEvaluations = accumulatedTiming.numEvaluations / config.timedRuns;
+        timing.numScenarios = accumulatedTiming.numScenarios / config.timedRuns;
         timing.singleScenarioTimeUs = accumulatedTiming.numScenarios > 0
             ? (accumulatedTiming.evaluationTimeMs * 1000.0) / accumulatedTiming.numScenarios
             : 0.0;
@@ -683,125 +837,158 @@ namespace {
     }
 
     //=========================================================================
-    // Print results table
+    // Print results table (multiple columns: Bump + SSE2 variants + AVX2 variants)
     //=========================================================================
     void printResultsTable(
         const std::string& testName,
         const TimingResults& bumpTiming,
         const XvaResults& bumpResults,
-        const TimingResults& xadTiming,
-        const XvaResults& xadResults,
+        // SSE2 variants
+        const TimingResults& sse2StabTiming,
+        const XvaResults& sse2StabResults,
+        const TimingResults& sse2AllOptTiming,
+        const XvaResults& sse2AllOptResults,
+        // AVX2 variants (nullptr if not available)
+        const TimingResults* avx2StabTiming,
+        const XvaResults* avx2StabResults,
+        const TimingResults* avx2AllOptTiming,
+        const XvaResults* avx2AllOptResults,
         const std::vector<IRPillar>& eurPillars,
         const XvaConfig& config) {
 
-        const int col1 = 24;
-        const int col2 = 18;
-        const int col3 = 18;
+        const int col0 = 22;  // Label column
+        const int colW = 12;  // Data columns (narrower to fit 5)
+
+        bool hasAvx2 = (avx2StabTiming != nullptr);
 
         auto line = [&]() {
-            std::cout << "+" << std::string(col1, '-') << "+"
-                      << std::string(col2, '-') << "+"
-                      << std::string(col3, '-') << "+\n";
+            std::cout << "+" << std::string(col0, '-');
+            for (int i = 0; i < (hasAvx2 ? 5 : 3); ++i)
+                std::cout << "+" << std::string(colW, '-');
+            std::cout << "+\n";
         };
+
+        int numCols = hasAvx2 ? 5 : 3;
 
         std::cout << "\n";
         line();
-        std::cout << "|" << std::setw(col1 + col2 + col3 + 2) << std::left
+        std::cout << "|" << std::setw(col0 + numCols * (colW + 1)) << std::left
                   << (" " + testName) << "|\n";
         line();
         std::cout << "| Config: " << config.numSwaps << " swap, "
                   << config.numTimeSteps << " step" << (config.numTimeSteps > 1 ? "s" : "") << ", "
                   << config.numPaths << " path" << (config.numPaths > 1 ? "s" : "") << ", "
                   << config.numRiskFactors << " RF";
-        int padding = col1 + col2 + col3 - 22 - std::to_string(config.numSwaps).length()
+        int padding = col0 + numCols * (colW + 1) - 20 - std::to_string(config.numSwaps).length()
                       - std::to_string(config.numTimeSteps).length()
                       - std::to_string(config.numPaths).length()
                       - std::to_string(config.numRiskFactors).length();
         std::cout << std::string(std::max(1, padding), ' ') << "|\n";
         line();
 
-        std::cout << "|" << std::setw(col1) << std::left << " Method"
-                  << "|" << std::setw(col2) << std::right << "Bump (AReal)"
-                  << "|" << std::setw(col3) << std::right << "XAD-AAD" << "|\n";
+        std::cout << "|" << std::setw(col0) << std::left << " Method"
+                  << "|" << std::setw(colW) << std::right << "Bump"
+                  << "|" << std::setw(colW) << std::right << "SSE2-Stab"
+                  << "|" << std::setw(colW) << std::right << "SSE2-All";
+        if (hasAvx2) {
+            std::cout << "|" << std::setw(colW) << std::right << "AVX2-Stab"
+                      << "|" << std::setw(colW) << std::right << "AVX2-All";
+        }
+        std::cout << "|\n";
         line();
 
         std::cout << std::fixed << std::setprecision(2);
 
-        // Report average runtime per timed iteration instead of total time
-        std::cout << "|" << std::setw(col1) << std::left << " Avg Time/Iter (ms)"
-                  << "|" << std::setw(col2) << std::right << bumpTiming.avgTimePerIterationMs
-                  << "|" << std::setw(col3) << std::right << xadTiming.avgTimePerIterationMs << "|\n";
+        std::cout << "|" << std::setw(col0) << std::left << " Total Time (ms)"
+                  << "|" << std::setw(colW) << std::right << bumpTiming.totalTimeMs
+                  << "|" << std::setw(colW) << std::right << sse2StabTiming.totalTimeMs
+                  << "|" << std::setw(colW) << std::right << sse2AllOptTiming.totalTimeMs;
+        if (hasAvx2) {
+            std::cout << "|" << std::setw(colW) << std::right << avx2StabTiming->totalTimeMs
+                      << "|" << std::setw(colW) << std::right << avx2AllOptTiming->totalTimeMs;
+        }
+        std::cout << "|\n";
 
-        std::cout << "|" << std::setw(col1) << std::left << " Tape Recording (ms)"
-                  << "|" << std::setw(col2) << std::right << "-"
-                  << "|" << std::setw(col3) << std::right << xadTiming.tapeTimeMs << "|\n";
+        std::cout << "|" << std::setw(col0) << std::left << " Pure Eval (ms)"
+                  << "|" << std::setw(colW) << std::right << bumpTiming.evaluationTimeMs
+                  << "|" << std::setw(colW) << std::right << sse2StabTiming.evaluationTimeMs
+                  << "|" << std::setw(colW) << std::right << sse2AllOptTiming.evaluationTimeMs;
+        if (hasAvx2) {
+            std::cout << "|" << std::setw(colW) << std::right << avx2StabTiming->evaluationTimeMs
+                      << "|" << std::setw(colW) << std::right << avx2AllOptTiming->evaluationTimeMs;
+        }
+        std::cout << "|\n";
 
-        std::cout << "|" << std::setw(col1) << std::left << " Adjoint Comp (ms)"
-                  << "|" << std::setw(col2) << std::right << "-"
-                  << "|" << std::setw(col3) << std::right << xadTiming.adjointTimeMs << "|\n";
-
-        std::cout << "|" << std::setw(col1) << std::left << " # Scenarios"
-                  << "|" << std::setw(col2) << std::right << bumpTiming.numScenarios
-                  << "|" << std::setw(col3) << std::right << xadTiming.numScenarios << "|\n";
-
-        std::cout << "|" << std::setw(col1) << std::left << " # Evaluations"
-                  << "|" << std::setw(col2) << std::right << bumpTiming.numEvaluations
-                  << "|" << std::setw(col3) << std::right << xadTiming.numEvaluations << "|\n";
-
-        std::cout << "|" << std::setw(col1) << std::left << " Time/Scenario (us)"
-                  << "|" << std::setw(col2) << std::right << bumpTiming.singleScenarioTimeUs
-                  << "|" << std::setw(col3) << std::right << xadTiming.singleScenarioTimeUs << "|\n";
+        std::cout << "|" << std::setw(col0) << std::left << " Kernel Create (ms)"
+                  << "|" << std::setw(colW) << std::right << "-"
+                  << "|" << std::setw(colW) << std::right << sse2StabTiming.kernelCreationTimeMs
+                  << "|" << std::setw(colW) << std::right << sse2AllOptTiming.kernelCreationTimeMs;
+        if (hasAvx2) {
+            std::cout << "|" << std::setw(colW) << std::right << avx2StabTiming->kernelCreationTimeMs
+                      << "|" << std::setw(colW) << std::right << avx2AllOptTiming->kernelCreationTimeMs;
+        }
+        std::cout << "|\n";
         line();
 
-        double speedup = bumpTiming.avgTimePerIterationMs > 0
-                       ? bumpTiming.avgTimePerIterationMs / xadTiming.avgTimePerIterationMs
-                       : 0.0;
-        std::cout << "|" << std::setw(col1) << std::left << " Speedup"
-                  << "|" << std::setw(col2-1) << std::right << "1.00" << "x"
-                  << "|" << std::setw(col3-1) << std::right << speedup << "x|\n";
-
-        Size evalsPerScenarioBump = 1 + config.numRiskFactors;
-        std::cout << "|" << std::setw(col1) << std::left << " Evals/Scenario"
-                  << "|" << std::setw(col2) << std::right << evalsPerScenarioBump
-                  << "|" << std::setw(col3) << std::right << "1" << "|\n";
-        std::cout << "|" << std::setw(col1) << std::left << " Expected AAD Benefit"
-                  << "|" << std::setw(col2) << std::right << "-"
-                  << "|" << std::setw(col3-1) << std::right << evalsPerScenarioBump << "x|\n";
+        // Speedup rows
+        double spSSE2Stab = bumpTiming.totalTimeMs / sse2StabTiming.totalTimeMs;
+        double spSSE2All = bumpTiming.totalTimeMs / sse2AllOptTiming.totalTimeMs;
+        std::cout << "|" << std::setw(col0) << std::left << " Speedup"
+                  << "|" << std::setw(colW-1) << std::right << "1.00" << "x"
+                  << "|" << std::setw(colW-1) << std::right << spSSE2Stab << "x"
+                  << "|" << std::setw(colW-1) << std::right << spSSE2All << "x";
+        if (hasAvx2) {
+            double spAVX2Stab = bumpTiming.totalTimeMs / avx2StabTiming->totalTimeMs;
+            double spAVX2All = bumpTiming.totalTimeMs / avx2AllOptTiming->totalTimeMs;
+            std::cout << "|" << std::setw(colW-1) << std::right << spAVX2Stab << "x"
+                      << "|" << std::setw(colW-1) << std::right << spAVX2All << "x";
+        }
+        std::cout << "|\n";
         line();
+        std::cout << "\n";
+    }
 
-        std::cout << std::scientific << std::setprecision(4);
-        std::cout << "|" << std::setw(col1) << std::left << " Expected Exposure"
-                  << "|" << std::setw(col2) << std::right << bumpResults.expectedExposure
-                  << "|" << std::setw(col3) << std::right << xadResults.expectedExposure << "|\n";
-        std::cout << "|" << std::setw(col1) << std::left << " CVA"
-                  << "|" << std::setw(col2) << std::right << bumpResults.cva
-                  << "|" << std::setw(col3) << std::right << xadResults.cva << "|\n";
-        line();
+    //=========================================================================
+    // Verify results match
+    //=========================================================================
+    bool verifyResults(
+        const XvaResults& bumpResults,
+        const XvaResults& forgeForwardResults,
+        const XvaConfig& config,
+        double tolerance = 0.001) {
 
-        // Sample sensitivities
-        Size numSensToShow = std::min(Size(5), config.numRiskFactors);
-        if (numSensToShow > 0 && !bumpResults.sensitivities.empty() &&
+        bool passed = true;
+
+        // Check expected exposure
+        double exposureDiff = std::abs(bumpResults.expectedExposure - forgeForwardResults.expectedExposure);
+        double exposureTol = std::abs(bumpResults.expectedExposure) * tolerance;
+
+        if (exposureDiff > exposureTol && bumpResults.expectedExposure > 1e-10) {
+            std::cerr << "WARNING: Exposure mismatch Bump vs Forge-Forward: " << exposureDiff << " > " << exposureTol << "\n";
+            passed = false;
+        }
+
+        // Check sensitivities for first scenario
+        if (!bumpResults.sensitivities.empty() &&
             !bumpResults.sensitivities[0].empty() &&
             !bumpResults.sensitivities[0][0].empty()) {
-            std::cout << "| Sample Sensitivities (Swap 0, Time 0, Path 0):"
-                      << std::string(col1 + col2 + col3 - 44, ' ') << "|\n";
-            line();
+            for (Size i = 0; i < config.numRiskFactors; ++i) {
+                double bumpSens = bumpResults.sensitivities[0][0][0][i];
+                if (std::abs(bumpSens) > 1e-10) {
+                    double forgeForwardSens = forgeForwardResults.sensitivities[0][0][0][i];
 
-            for (Size i = 0; i < numSensToShow && i < eurPillars.size(); ++i) {
-                std::string label = " dNPV/d(" + eurPillars[i].name + ")";
-                std::cout << "|" << std::setw(col1) << std::left << label
-                          << "|" << std::setw(col2) << std::right << bumpResults.sensitivities[0][0][0][i]
-                          << "|" << std::setw(col3) << std::right << xadResults.sensitivities[0][0][0][i] << "|\n";
+                    double diff = std::abs(bumpSens - forgeForwardSens) / std::abs(bumpSens);
+
+                    if (diff > 0.01) {  // 1% tolerance for sensitivities
+                        std::cerr << "WARNING: Sensitivity[" << i << "] mismatch Bump vs Forge-Forward: "
+                                  << bumpSens << " vs " << forgeForwardSens << " (" << diff*100 << "%)\n";
+                        passed = false;
+                    }
+                }
             }
-            if (config.numRiskFactors > numSensToShow) {
-                std::string moreLabel = " ... (" + std::to_string(config.numRiskFactors - numSensToShow) + " more)";
-                std::cout << "|" << std::setw(col1) << std::left << moreLabel
-                          << "|" << std::setw(col2) << " "
-                          << "|" << std::setw(col3) << " " << "|\n";
-            }
-            line();
         }
-        std::cout << "\n";
+
+        return passed;
     }
 
     //=========================================================================
@@ -834,12 +1021,22 @@ namespace {
 }  // namespace
 
 //=============================================================================
-// MAIN: XVA Benchmark with XAD (Bump-Reval vs AAD)
+// MAIN: XVA Forge Forward-Only Benchmark (Bump-Reval vs Forge-Forward Bump-Reval)
 //=============================================================================
 int main(int argc, char* argv[]) {
     std::cout << "=============================================================\n";
-    std::cout << "  XVA Benchmark - QuantLib with XAD (tape-based AAD)\n";
+    std::cout << "  XVA Benchmark - QuantLib with Forge (Forward-Only, No AAD)\n";
+    std::cout << "  Uses markForgeInput() - no gradient buffers allocated\n";
+    std::cout << "  SSE2 vs AVX2 comparison with Stability vs All Optimizations\n";
     std::cout << "=============================================================\n";
+
+    // Check AVX2 support
+    bool avx2Supported = isAVX2Supported();
+    std::cout << "\n  CPU AVX2 Support: " << (avx2Supported ? "YES" : "NO") << "\n";
+    if (!avx2Supported) {
+        std::cout << "  (AVX2 columns will be skipped)\n";
+    }
+    std::cout << "\n";
 
     try {
         Calendar calendar = TARGET();
@@ -851,37 +1048,84 @@ int main(int argc, char* argv[]) {
         auto baseRiskFactors = createBaseRiskFactors();
         auto testCases = createTestCases();
 
+        bool allPassed = true;
+
         for (const auto& config : testCases) {
             std::cout << "\nRunning " << config.name << "...\n";
 
             auto swaps = createSwapDefinitions(config.numSwaps);
             auto scenarios = generateScenarios(config, eurPillars, baseRiskFactors);
 
-            // 1. Bump-Reval (uses AReal but no tape recording)
+            // 1. Bump-Reval (baseline)
             std::cout << "  Bump-Reval (" << config.numRiskFactors << " RF)...\n";
             XvaResults bumpResults;
             auto bumpTiming = runWithTiming(computeBumpReval, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, bumpResults);
 
-            // 2. XAD AAD (tape-based)
-            std::cout << "  XAD-AAD (" << config.numRiskFactors << " RF)...\n";
-            XvaResults xadResults;
-            auto xadTiming = runWithTiming(computeXadAad, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, xadResults);
+            // 2. SSE2 variants
+            std::cout << "  SSE2-Stability (" << config.numRiskFactors << " RF)...\n";
+            XvaResults sse2StabResults;
+            auto sse2StabTiming = runWithTiming(computeForgeForwardSSE2Stability, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, sse2StabResults);
+
+            std::cout << "  SSE2-AllOpt (" << config.numRiskFactors << " RF)...\n";
+            XvaResults sse2AllOptResults;
+            auto sse2AllOptTiming = runWithTiming(computeForgeForwardSSE2AllOpt, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, sse2AllOptResults);
+
+            // 3. AVX2 variants (if supported)
+            TimingResults* avx2StabTiming = nullptr;
+            XvaResults* avx2StabResults = nullptr;
+            TimingResults* avx2AllOptTiming = nullptr;
+            XvaResults* avx2AllOptResults = nullptr;
+
+            if (avx2Supported) {
+                std::cout << "  AVX2-Stability (" << config.numRiskFactors << " RF)...\n";
+                avx2StabResults = new XvaResults();
+                avx2StabTiming = new TimingResults();
+                *avx2StabTiming = runWithTiming(computeForgeForwardAVX2Stability, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, *avx2StabResults);
+
+                std::cout << "  AVX2-AllOpt (" << config.numRiskFactors << " RF)...\n";
+                avx2AllOptResults = new XvaResults();
+                avx2AllOptTiming = new TimingResults();
+                *avx2AllOptTiming = runWithTiming(computeForgeForwardAVX2AllOpt, config, swaps, scenarios, eurPillars, today, calendar, dayCounter, *avx2AllOptResults);
+            }
 
             // Print results
-            printResultsTable(config.name, bumpTiming, bumpResults, xadTiming, xadResults, eurPillars, config);
+            printResultsTable(config.name, bumpTiming, bumpResults,
+                              sse2StabTiming, sse2StabResults,
+                              sse2AllOptTiming, sse2AllOptResults,
+                              avx2StabTiming, avx2StabResults,
+                              avx2AllOptTiming, avx2AllOptResults,
+                              eurPillars, config);
 
-            // Verify results match
-            double exposureDiff = std::abs(bumpResults.expectedExposure - xadResults.expectedExposure);
-            double tolerance = std::abs(bumpResults.expectedExposure) * 0.001;
-            if (exposureDiff > tolerance && bumpResults.expectedExposure > 1e-10) {
-                std::cerr << "WARNING: Expected exposure mismatch: " << exposureDiff << " > " << tolerance << "\n";
+            // Verify results match (check SSE2 variants against baseline)
+            bool verified = verifyResults(bumpResults, sse2StabResults, config);
+            verified = verified && verifyResults(bumpResults, sse2AllOptResults, config);
+            if (avx2Supported) {
+                verified = verified && verifyResults(bumpResults, *avx2StabResults, config);
+                verified = verified && verifyResults(bumpResults, *avx2AllOptResults, config);
+            }
+            if (!verified) {
+                allPassed = false;
+            }
+
+            // Cleanup AVX2 results
+            if (avx2Supported) {
+                delete avx2StabTiming;
+                delete avx2StabResults;
+                delete avx2AllOptTiming;
+                delete avx2AllOptResults;
             }
         }
 
         std::cout << "=============================================================\n";
-        std::cout << "  XAD benchmark completed successfully.\n";
+        if (allPassed) {
+            std::cout << "  All results verified successfully.\n";
+        } else {
+            std::cout << "  WARNING: Some results did not match within tolerance.\n";
+        }
+        std::cout << "  Forge forward-only benchmark completed successfully.\n";
         std::cout << "=============================================================\n";
-        return 0;
+
+        return allPassed ? 0 : 1;
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
